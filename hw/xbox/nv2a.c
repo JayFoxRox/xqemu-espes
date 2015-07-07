@@ -37,6 +37,7 @@
 
 #include "hw/xbox/nv2a.h"
 
+#define RECORD_NV2A
 #define DEBUG_NV2A
 #ifdef DEBUG_NV2A
 # define NV2A_DPRINTF(format, ...)       printf("nv2a: " format, ## __VA_ARGS__)
@@ -1365,8 +1366,8 @@ typedef struct NV2AState {
 #define NV2A_DEVICE(obj) \
     OBJECT_CHECK(NV2AState, (obj), "nv2a")
 
-static void reg_log_read(int block, hwaddr addr, uint64_t val);
-static void reg_log_write(int block, hwaddr addr, uint64_t val);
+static void reg_log_read(NV2AState *d, int block, hwaddr addr, uint64_t val, unsigned int size);
+static void reg_log_write(NV2AState *d, int block, hwaddr addr, uint64_t val, unsigned int size);
 static void pgraph_method_log(unsigned int subchannel,
                               unsigned int graphics_class,
                               unsigned int method, uint32_t parameter);
@@ -4079,7 +4080,7 @@ static uint64_t pmc_read(void *opaque,
         break;
     }
 
-    reg_log_read(NV_PMC, addr, r);
+    reg_log_read(d, NV_PMC, addr, r, size);
     return r;
 }
 static void pmc_write(void *opaque, hwaddr addr,
@@ -4087,7 +4088,7 @@ static void pmc_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PMC, addr, val);
+    reg_log_write(d, NV_PMC, addr, val, size);
 
     switch (addr) {
     case NV_PMC_INTR_0:
@@ -4126,7 +4127,7 @@ static uint64_t pbus_read(void *opaque,
         break;
     }
 
-    reg_log_read(NV_PBUS, addr, r);
+    reg_log_read(d, NV_PBUS, addr, r, size);
     return r;
 }
 static void pbus_write(void *opaque, hwaddr addr,
@@ -4134,7 +4135,7 @@ static void pbus_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PBUS, addr, val);
+    reg_log_write(d, NV_PBUS, addr, val, size);
 
     switch (addr) {
     case NV_PBUS_PCI_NV_1:
@@ -4240,7 +4241,7 @@ static uint64_t pfifo_read(void *opaque,
         break;
     }
 
-    reg_log_read(NV_PFIFO, addr, r);
+    reg_log_read(d, NV_PFIFO, addr, r, size);
     return r;
 }
 static void pfifo_write(void *opaque, hwaddr addr,
@@ -4249,7 +4250,7 @@ static void pfifo_write(void *opaque, hwaddr addr,
     int i;
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PFIFO, addr, val);
+    reg_log_write(d, NV_PFIFO, addr, val, size);
 
     switch (addr) {
     case NV_PFIFO_INTR_0:
@@ -4353,13 +4354,17 @@ static void pfifo_write(void *opaque, hwaddr addr,
 static uint64_t prma_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
-    reg_log_read(NV_PRMA, addr, 0);
+    NV2AState *d = opaque;
+
+    reg_log_read(d, NV_PRMA, addr, 0, size);
     return 0;
 }
 static void prma_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
-    reg_log_write(NV_PRMA, addr, val);
+    NV2AState *d = opaque;
+
+    reg_log_write(d, NV_PRMA, addr, val, size);
 }
 
 
@@ -4388,7 +4393,7 @@ static uint64_t pvideo_read(void *opaque,
         break;
     }
 
-    reg_log_read(NV_PVIDEO, addr, r);
+    reg_log_read(d, NV_PVIDEO, addr, r, size);
     return r;
 }
 static void pvideo_write(void *opaque, hwaddr addr,
@@ -4396,7 +4401,7 @@ static void pvideo_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PVIDEO, addr, val);
+    reg_log_write(d, NV_PVIDEO, addr, val, size);
 
     switch (addr) {
     case NV_PVIDEO_BUFFER:
@@ -4454,7 +4459,7 @@ static uint64_t ptimer_read(void *opaque,
         break;
     }
 
-    reg_log_read(NV_PTIMER, addr, r);
+    reg_log_read(d, NV_PTIMER, addr, r, size);
     return r;
 }
 static void ptimer_write(void *opaque, hwaddr addr,
@@ -4462,7 +4467,7 @@ static void ptimer_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PTIMER, addr, val);
+    reg_log_write(d, NV_PTIMER, addr, val, size);
 
     switch (addr) {
     case NV_PTIMER_INTR_0:
@@ -4491,52 +4496,68 @@ static void ptimer_write(void *opaque, hwaddr addr,
 static uint64_t pcounter_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
-    reg_log_read(NV_PCOUNTER, addr, 0);
+    NV2AState *d = opaque;
+
+    reg_log_read(d, NV_PCOUNTER, addr, 0, size);
     return 0;
 }
 static void pcounter_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
-    reg_log_write(NV_PCOUNTER, addr, val);
+    NV2AState *d = opaque;
+
+    reg_log_write(d, NV_PCOUNTER, addr, val, size);
 }
 
 
 static uint64_t pvpe_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
-    reg_log_read(NV_PVPE, addr, 0);
+    NV2AState *d = opaque;
+
+    reg_log_read(d, NV_PVPE, addr, 0, size);
     return 0;
 }
 static void pvpe_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
-    reg_log_write(NV_PVPE, addr, val);
+    NV2AState *d = opaque;
+
+    reg_log_write(d, NV_PVPE, addr, val, size);
 }
 
 
 static uint64_t ptv_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
-    reg_log_read(NV_PTV, addr, 0);
+    NV2AState *d = opaque;
+
+    reg_log_read(d, NV_PTV, addr, 0, size);
     return 0;
 }
 static void ptv_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
-    reg_log_write(NV_PTV, addr, val);
+    NV2AState *d = opaque;
+
+    reg_log_write(d, NV_PTV, addr, val, size);
 }
 
 
 static uint64_t prmfb_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
-    reg_log_read(NV_PRMFB, addr, 0);
+    NV2AState *d = opaque;
+
+    reg_log_read(d, NV_PRMFB, addr, 0, size);
     return 0;
 }
 static void prmfb_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
-    reg_log_write(NV_PRMFB, addr, val);
+    NV2AState *d = opaque;
+
+    reg_log_write(d, NV_PRMFB, addr, val, size);
 }
 
 
@@ -4547,7 +4568,7 @@ static uint64_t prmvio_read(void *opaque,
     NV2AState *d = opaque;
     uint64_t r = vga_ioport_read(&d->vga, addr);
 
-    reg_log_read(NV_PRMVIO, addr, r);
+    reg_log_read(d, NV_PRMVIO, addr, r, size);
     return r;
 }
 static void prmvio_write(void *opaque, hwaddr addr,
@@ -4555,7 +4576,7 @@ static void prmvio_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PRMVIO, addr, val);
+    reg_log_write(d, NV_PRMVIO, addr, val, size);
 
     vga_ioport_write(&d->vga, addr, val);
 }
@@ -4583,7 +4604,7 @@ static uint64_t pfb_read(void *opaque,
         break;
     }
 
-    reg_log_read(NV_PFB, addr, r);
+    reg_log_read(d, NV_PFB, addr, r, size);
     return r;
 }
 static void pfb_write(void *opaque, hwaddr addr,
@@ -4591,7 +4612,7 @@ static void pfb_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PFB, addr, val);
+    reg_log_write(d, NV_PFB, addr, val, size);
 
     switch (addr) {
     default:
@@ -4604,13 +4625,17 @@ static void pfb_write(void *opaque, hwaddr addr,
 static uint64_t pstraps_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
-    reg_log_read(NV_PSTRAPS, addr, 0);
+    NV2AState *d = opaque;
+
+    reg_log_read(d, NV_PSTRAPS, addr, 0, size);
     return 0;
 }
 static void pstraps_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
-    reg_log_write(NV_PSTRAPS, addr, val);
+    NV2AState *d = opaque;
+
+    reg_log_write(d, NV_PSTRAPS, addr, val, size);
 }
 
 /* PGRAPH - accelerated 2d/3d drawing engine */
@@ -4664,7 +4689,7 @@ static uint64_t pgraph_read(void *opaque,
 
     qemu_mutex_unlock(&d->pgraph.lock);
 
-    reg_log_read(NV_PGRAPH, addr, r);
+    reg_log_read(d, NV_PGRAPH, addr, r, size);
     return r;
 }
 static void pgraph_set_context_user(NV2AState *d, uint32_t val)
@@ -4681,7 +4706,7 @@ static void pgraph_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PGRAPH, addr, val);
+    reg_log_write(d, NV_PGRAPH, addr, val, size);
 
     qemu_mutex_lock(&d->pgraph.lock);
 
@@ -4770,7 +4795,7 @@ static uint64_t pcrtc_read(void *opaque,
             break;
     }
 
-    reg_log_read(NV_PCRTC, addr, r);
+    reg_log_read(d, NV_PCRTC, addr, r, size);
     return r;
 }
 static void pcrtc_write(void *opaque, hwaddr addr,
@@ -4778,7 +4803,7 @@ static void pcrtc_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PCRTC, addr, val);
+    reg_log_write(d, NV_PCRTC, addr, val, size);
 
     switch (addr) {
     case NV_PCRTC_INTR_0:
@@ -4811,7 +4836,7 @@ static uint64_t prmcio_read(void *opaque,
     NV2AState *d = opaque;
     uint64_t r = vga_ioport_read(&d->vga, addr);
 
-    reg_log_read(NV_PRMCIO, addr, r);
+    reg_log_read(d, NV_PRMCIO, addr, r, size);
     return r;
 }
 static void prmcio_write(void *opaque, hwaddr addr,
@@ -4819,7 +4844,7 @@ static void prmcio_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_PRMCIO, addr, val);
+    reg_log_write(d, NV_PRMCIO, addr, val, size);
 
     switch (addr) {
     case VGA_ATT_W:
@@ -4879,7 +4904,7 @@ static void pramdac_write(void *opaque, hwaddr addr,
     NV2AState *d = opaque;
     uint32_t m, n, p;
 
-    reg_log_write(NV_PRAMDAC, addr, val);
+    reg_log_write(d, NV_PRAMDAC, addr, val, size);
 
     switch (addr) {
     case NV_PRAMDAC_NVPLL_COEFF:
@@ -4912,13 +4937,17 @@ static void pramdac_write(void *opaque, hwaddr addr,
 static uint64_t prmdio_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
-    reg_log_read(NV_PRMDIO, addr, 0);
+    NV2AState *d = opaque;
+
+    reg_log_read(d, NV_PRMDIO, addr, 0, size);
     return 0;
 }
 static void prmdio_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
-    reg_log_write(NV_PRMDIO, addr, val);
+    NV2AState *d = opaque;
+
+    reg_log_write(d, NV_PRMDIO, addr, val, size);
 }
 
 
@@ -4971,7 +5000,7 @@ static uint64_t user_read(void *opaque,
         assert(false);
     }
 
-    reg_log_read(NV_USER, addr, r);
+    reg_log_read(d, NV_USER, addr, r, size);
     return r;
 }
 static void user_write(void *opaque, hwaddr addr,
@@ -4979,7 +5008,7 @@ static void user_write(void *opaque, hwaddr addr,
 {
     NV2AState *d = opaque;
 
-    reg_log_write(NV_USER, addr, val);
+    reg_log_write(d, NV_USER, addr, val, size);
 
     unsigned int channel_id = addr >> 16;
     assert(channel_id < NV2A_NUM_CHANNELS);
@@ -5206,10 +5235,110 @@ static const struct NV2ABlockInfo blocktable[] = {
     },
 };
 
+#ifdef RECORD_NV2A
+/* We need those elsewhere */
+const struct NV2ABlockInfo* nv2a_blocktable = blocktable;
+const size_t nv2a_blocktable_size = sizeof(blocktable);
+bool record_playback = false;
+
+static void dump_memory(FILE* f, NV2AState* d, bool is_ramin) {
+
+  MemoryRegion* mr = is_ramin?&d->ramin:d->vram;
+
+  memory_region_sync_dirty_bitmap(mr);
+  uint32_t maddr = 0;
+  uint32_t size = memory_region_size(mr);
+  while(maddr < size) {
+    uint8_t buffer[TARGET_PAGE_SIZE];
+    uint32_t l = sizeof(buffer);
+    if ((maddr + l) > size) {
+      l = size - maddr;
+    }
+    /* Write page if it was updated */
+    bool dirty = memory_region_test_and_clear_dirty(mr,maddr,l,DIRTY_MEMORY_MIGRATION);
+    if (dirty) {
+      fwrite(&l,4,1,f);
+      fwrite(&maddr,4,1,f);
+      //FIXME: Check if memory is blank or 0xFF and set a flag accordingly, don't store data then
+      if (is_ramin) {
+        fwrite(&d->ramin_ptr[maddr],l,1,f);
+      } else {
+        cpu_physical_memory_read(maddr, buffer, l);
+        fwrite(buffer,l,1,f);
+      }
+    }
+    maddr += l;
+  }
+  uint32_t null = 0;
+  fwrite(&null,4,1,f);
+  return;
+}
+
+/* Records the NV2A R/W to file so we can debug the NV2A seperately */
+static void record_rw(NV2AState *d, const char *name, bool write, hwaddr addr, uint64_t val, unsigned int size) {
+
+  if (record_playback) {
+    return;
+  }
+
+  /* Open the log file */
+  static FILE* f = NULL;
+  static uint32_t ram_size;
+  if (f == NULL) {
+    f = fopen("nv2a.record","wb");
+    if (f == NULL) {
+      fprintf(stderr,"Can't log!\n");
+      exit(1);
+    }
+
+    /* Write a header */
+    uint8_t version = 0;
+    fwrite(&version,1,1,f);
+    ram_size = memory_region_size(d->vram);
+    fwrite(&ram_size,4,1,f);
+
+    /* Set everything dirty for first run [we'll abuse migration] */
+    //FIXME: only do this for pages which are not all zero
+    memory_region_set_log(d->vram, true, DIRTY_MEMORY_MIGRATION);
+    memory_region_set_client_dirty(d->vram, 0, memory_region_size(d->vram), DIRTY_MEMORY_MIGRATION);
+    memory_region_set_log(&d->ramin, true, DIRTY_MEMORY_MIGRATION);
+    memory_region_set_client_dirty(&d->ramin, 0, memory_region_size(&d->ramin), DIRTY_MEMORY_MIGRATION);
+  }
+
+  /* write 'addr' and 'val' */
+  bool data = write|true;
+  uint8_t flags = 0;
+  flags |= write?1:0;
+  flags |= data?2:0;
+  fwrite(&flags,1,1,f);
+  fwrite(&addr,4,1,f);
+  if (data) {
+    fwrite(&val,8,1,f);
+  }
+  uint8_t len = size;
+  fwrite(&len,1,1,f);
+
+  /* Store memory pages */
+  dump_memory(f,d,false);
+  dump_memory(f,d,true);
+
+  fflush(f);
+
+  static unsigned int frame = 0;
+  NV2A_DPRINTF("frame %i\n",frame++);
+
+  return;
+
+}
+#endif
+
 static const char* nv2a_reg_names[] = {};
 static const char* nv2a_method_names[] = {};
 
-static void reg_log_read(int block, hwaddr addr, uint64_t val) {
+static void reg_log_read(NV2AState *d, int block, hwaddr addr, uint64_t val, unsigned int size) {
+#ifdef RECORD_NV2A
+    record_rw(d,blocktable[block].name,false,blocktable[block].offset + addr,val,size);
+#endif
     if (blocktable[block].name) {
         hwaddr naddr = blocktable[block].offset + addr;
         if (naddr < sizeof(nv2a_reg_names)/sizeof(const char*)
@@ -5226,7 +5355,10 @@ static void reg_log_read(int block, hwaddr addr, uint64_t val) {
     }
 }
 
-static void reg_log_write(int block, hwaddr addr, uint64_t val) {
+static void reg_log_write(NV2AState *d, int block, hwaddr addr, uint64_t val, unsigned int size) {
+#ifdef RECORD_NV2A
+    record_rw(d,blocktable[block].name,true,blocktable[block].offset + addr,val,size);
+#endif
     if (blocktable[block].name) {
         hwaddr naddr = blocktable[block].offset + addr;
         if (naddr < sizeof(nv2a_reg_names)/sizeof(const char*)

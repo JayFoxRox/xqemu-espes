@@ -29,6 +29,7 @@ PROGS=$(QEMU_PROG)
 ifdef QEMU_PROGW
 PROGS+=$(QEMU_PROGW)
 endif
+PROGS+=nv2a-replay
 STPFILES=
 
 config-target.h: config-target.h-timestamp
@@ -168,6 +169,12 @@ else
 $(QEMU_PROG): $(all-obj-y) ../libqemuutil.a ../libqemustub.a
 	$(call LINK,$^)
 endif
+
+nv2a-obj-y := $(subst vl.o,nv2a-replay-vl.o nv2a-replay.o,$(all-obj-y))
+nv2a-replay-vl.o: QEMU_CFLAGS+=$(GPROF_CFLAGS)
+nv2a-replay-vl.o: QEMU_CFLAGS+=$(SDL_CFLAGS)
+nv2a-replay: $(nv2a-obj-y) ../libqemuutil.a ../libqemustub.a
+	$(call LINK,$^)
 
 gdbstub-xml.c: $(TARGET_XML_FILES) $(SRC_PATH)/scripts/feature_to_c.sh
 	$(call quiet-command,rm -f $@ && $(SHELL) $(SRC_PATH)/scripts/feature_to_c.sh $@ $(TARGET_XML_FILES),"  GEN   $(TARGET_DIR)$@")
