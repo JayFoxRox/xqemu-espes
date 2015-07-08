@@ -638,7 +638,8 @@ fprintf(stderr,"F%i\n",frame);
       uint32_t dma_get_addr = 0x2000+0x1244;
       if (addr == dma_put_addr) {
         //FIXME: Stop re-recording shortly
-        while(1) {
+        unsigned int t = 1000000;
+        while(t--) {
           uint32_t dma_put = block->ops.read((void*)d,(hwaddr)(dma_put_addr-block->offset),4);
           uint32_t dma_get = block->ops.read((void*)d,(hwaddr)(dma_get_addr-block->offset),4);
           if (dma_put == dma_get) {
