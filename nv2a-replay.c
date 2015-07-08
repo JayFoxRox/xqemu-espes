@@ -580,9 +580,15 @@ static void replay(File* f) {
   record_playback = true;
 
   unsigned int frame = 0;
+  int last_io = 0;
   while(!is_eof(f)) {
 
-    main_loop_wait(0);
+#if 0
+    bool nonblocking = last_io > 0;
+    last_io = main_loop_wait(nonblocking);
+#endif
+
+//usleep(1000*2); //FIXME: Getting random errors without this, not sure where it races..
  
     uint8_t flags = read_uint8(f);
     bool write = flags & 1;
@@ -594,6 +600,7 @@ static void replay(File* f) {
     }
     uint8_t len = read_uint8(f);
     unsigned int size = len;
+fprintf(stderr,"F%i\n",frame);
     dprintf("Frame %i { %s: 0x%08X 0x%lX %i }\n",frame,write?"Read":"Write",addr,data?val:0xDEADBEEF,size);
 
     dprintf("Updating memory image\n");
@@ -609,42 +616,86 @@ static void replay(File* f) {
 
     dprintf("Executing block [%s] access\n",block->name);
     if (write) {
-      block->ops.write((void*)d,(hwaddr)addr-block->offset,val,size);
-    } else {
-bool spin = true;
-block_read:;
-      uint64_t val_now = block->ops.read((void*)d,(hwaddr)addr-block->offset,size);
 
-      /* Spin until the interrupts are here */
-      if ((addr == 0x100) || (addr == 0x140)) { /* NV_PMC_INTR_0 || NV_PMC_INTR_EN_0 */
-        assert(data);
-        if (val != val_now) {
-          dprintf("Spinning, expected 0x%08lX, got 0x%08lX\n", val, val_now);
-if (spin == false) { goto foo; }
-spin = false;
-
-
-// Do vblank
-    graphic_hw_update(con);
-
-
-
-
-          goto block_read;
+#if 0
+      uint32_t pmc_pending_addr = 0x0+0x100;
+      uint32_t pmc_enabled_addr = 0x0+0x140;
+      if (addr == pmc_pending_addr) {
+        if (data) {
+          uint32_t pmc_pending = block->ops.read((void*)d,(hwaddr)(pmc_pending_addr-block->offset),4);
+          /* Probably waiting for fifo */
+          if (val & (1<<12)) {
+            printf("Killing pgraph intr: 0x%08X\n",val);
+          }
         }
       }
+#endif
+
+      block->ops.write((void*)d,(hwaddr)addr-block->offset,val,size);
+
+#if 1 /* Wait for pusher to complete */
+      uint32_t dma_put_addr = 0x2000+0x1240;
+      uint32_t dma_get_addr = 0x2000+0x1244;
+      if (addr == dma_put_addr) {
+        //FIXME: Stop re-recording shortly
+        while(1) {
+          uint32_t dma_put = block->ops.read((void*)d,(hwaddr)(dma_put_addr-block->offset),4);
+          uint32_t dma_get = block->ops.read((void*)d,(hwaddr)(dma_get_addr-block->offset),4);
+          if (dma_put == dma_get) {
+            break;
+          }
+          usleep(1); //FIXME: Something better for a task switch would be nice
+        }
+        //FIXME: Turn it back on
+      }
+#endif
+
+    } else {
+
+#if 1 /* Do sync work */
+      uint32_t pmc_pending_addr = 0x0+0x100;
+      uint32_t pmc_enabled_addr = 0x0+0x140;
+      if (addr == pmc_pending_addr) {
+        if (data) {
+          uint32_t pmc_pending = block->ops.read((void*)d,(hwaddr)(pmc_pending_addr-block->offset),4);
+          /* Probably waiting for pgraph puller */
+          if (val & (1<<12)) {
+            printf("Waiting for pgraph interrupt\n");
+            int t = 10000; /* Timeout for puller wait, hacky.. */
+            while (!(pmc_pending & (1 << 12))) {
+              usleep(1);
+              if (!t--) { break; }
+            }
+          }
+          /* Probably had a vblank because crtc needs some love */
+          if (val & 0x01000000) {
+            if (!(pmc_pending & 0x01000000)) {
+              printf("\nForcing vblank!\n\n");
+              graphic_hw_update(con);
+            }
+          }
+
+        }
+      }
+#endif
+
+#if 1 /* Allow reads? */
+
+      uint64_t val_now = block->ops.read((void*)d,(hwaddr)addr-block->offset,size);
+
+#if 0 /* Verify reads? */
+      if (data) {
+        if (val_now != val) {
+          printf("GPU returned different value! Expected 0x%08X, got 0x%08X\n",val,val_now);
+          usleep(1000*1000);
+        }
+      }
+#endif
+
+#endif
 
     }
-foo:
-//          usleep(100*1000);
 
-/* Sync Hack */
-#if 0
-//if (frame > 7000) {
-if (true) {
-    usleep(30*1000);
-}
-#endif
 
     if (frame % 200 == 0) {
       dprintf("Taking screenshot\n");
