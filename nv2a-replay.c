@@ -306,7 +306,21 @@ static void init_qemu(ram_addr_t ram_size) {
 
   printf("RAM Size is %luMB\n",ram_size/1024/1024);
   
-  bios_name = "Complex_4627.bin"; //FIXME: generate blank bios
+  /* Generate a blank bios */
+  char path[PATH_MAX + 1];
+  get_tmp_filename(path,sizeof(path));
+  printf("Temporary file in '%s'\n",path);
+  FILE* f = fopen(path,"wb");
+  if (f == NULL) {
+    fprintf(stderr,"Unable to generate bios in %s\n",path);
+  }
+  size_t l = 1 * 1024 * 1024;
+  while(l--) {
+    uint8_t b;
+    fwrite(&b,1,1,f);
+  }
+  fclose(f);
+  bios_name = path;
 
   QEMUMachineInitArgs args = { .ram_size = ram_size,
                                .boot_order = machine->default_boot_order,
@@ -314,8 +328,6 @@ static void init_qemu(ram_addr_t ram_size) {
                                .kernel_cmdline = NULL,
                                .initrd_filename = NULL,
                                .cpu_model = "pentium3" };
-
-  //FIXME: Generate a tmp *blank* bios so we can skip loading a real one
 
   dprintf("Going to init machine!\n");
   machine->init(&args);
