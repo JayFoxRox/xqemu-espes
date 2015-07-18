@@ -541,6 +541,27 @@ static QString* psh_convert(struct PixelShader *ps)
     qstring_append(preflight, "\n");
     qstring_append(preflight, "uniform vec4 fogColor;\n");
 
+    /* Clipping */
+    /* FIXME: count + inclusive/exclusive should probably be stored in state */
+    QString *clip = qstring_new();
+    qstring_append(preflight, "uniform ivec4 clipRegion[8];\n");
+    qstring_append(preflight, "uniform bool clipRegionExclusive;\n");
+    qstring_append(clip, "/*  Window-clip */\n"
+                         "bool clipContained = false;\n"
+                         "for (int i = 0; i < 8; i++) {\n"
+                         "  bvec4 clipTest = bvec4(lessThan(gl_FragCoord.xy, clipRegion[i].xy),\n"
+                         "                         greaterThan(gl_FragCoord.xy, clipRegion[i].zw));\n"
+                         "  clipContained = clipContained || !any(clipTest);\n"
+                         /* Early out for exclusive window clip */
+                         "  if (clipRegionExclusive && clipContained) {\n"
+                         "    discard;\n"
+                         "  }\n"
+                         "}\n"
+                         /* Check for inclusive window clip */
+                         "if (!clipRegionExclusive && !clipContained) {\n"
+                         "  discard;\n"
+                         "}\n");
+
     /* calculate perspective-correct inputs */
     QString *vars = qstring_new();
     qstring_append(vars, "vec4 pD0 = vtx.D0 / vtx.inv_w;\n");
@@ -705,6 +726,7 @@ static QString* psh_convert(struct PixelShader *ps)
     qstring_append(final, "#version 330\n\n");
     qstring_append(final, qstring_get_str(preflight));
     qstring_append(final, "void main() {\n");
+    qstring_append(final, qstring_get_str(clip));
     qstring_append(final, qstring_get_str(vars));
     qstring_append(final, qstring_get_str(ps->code));
     qstring_append(final, "fragColor = r0;\n");

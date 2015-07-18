@@ -451,6 +451,7 @@
 #   define NV_PGRAPH_SETUPRASTER_FRONTFACE                      (1 << 23)
 #   define NV_PGRAPH_SETUPRASTER_CULLENABLE                     (1 << 28)
 #   define NV_PGRAPH_SETUPRASTER_Z_FORMAT                       (1 << 29)
+#   define NV_PGRAPH_SETUPRASTER_WINDOWCLIPTYPE                 (1 << 31)
 #define NV_PGRAPH_SHADERCLIPMODE                         0x00001994
 #define NV_PGRAPH_SHADERCTL                              0x00001998
 #define NV_PGRAPH_SHADERPROG                             0x0000199C
@@ -538,6 +539,25 @@
 #define NV_PGRAPH_TEXPALETTE1                            0x00001A38
 #define NV_PGRAPH_TEXPALETTE2                            0x00001A3C
 #define NV_PGRAPH_TEXPALETTE3                            0x00001A40
+#define NV_PGRAPH_WINDOWCLIPX0                           0x00001A44
+#   define NV_PGRAPH_WINDOWCLIPX0_XMIN                          0x00000FFF
+#   define NV_PGRAPH_WINDOWCLIPX0_XMAX                          0x0FFF0000
+#define NV_PGRAPH_WINDOWCLIPX1                           0x00001A48
+#define NV_PGRAPH_WINDOWCLIPX2                           0x00001A4C
+#define NV_PGRAPH_WINDOWCLIPX3                           0x00001A50
+#define NV_PGRAPH_WINDOWCLIPX4                           0x00001A54
+#define NV_PGRAPH_WINDOWCLIPX5                           0x00001A58
+#define NV_PGRAPH_WINDOWCLIPX6                           0x00001A5C
+#define NV_PGRAPH_WINDOWCLIPX7                           0x00001A60
+#define NV_PGRAPH_WINDOWCLIPY0                           0x00001A64
+#define NV_PGRAPH_WINDOWCLIPY1                           0x00001A68
+#define NV_PGRAPH_WINDOWCLIPY2                           0x00001A6C
+#define NV_PGRAPH_WINDOWCLIPY3                           0x00001A70
+#define NV_PGRAPH_WINDOWCLIPY4                           0x00001A74
+#define NV_PGRAPH_WINDOWCLIPY5                           0x00001A78
+#define NV_PGRAPH_WINDOWCLIPY6                           0x00001A7C
+#define NV_PGRAPH_WINDOWCLIPY7                           0x00001A80
+
 #define NV_PGRAPH_ZSTENCILCLEARVALUE                     0x00001A88
 #define NV_PGRAPH_ZCLIPMIN                               0x00001A90
 #define NV_PGRAPH_EYEVEC0                                0x00001AAC
@@ -771,6 +791,11 @@
 #       define NV097_SET_FOG_COLOR_GREEN                          0x0000FF00
 #       define NV097_SET_FOG_COLOR_BLUE                           0x00FF0000
 #       define NV097_SET_FOG_COLOR_ALPHA                          0xFF000000
+#   define NV097_SET_WINDOW_CLIP_TYPE                         0x009702B4
+#   define NV097_SET_WINDOW_CLIP_HORIZONTAL                   0x009702C0
+#       define NV097_SET_WINDOW_CLIP_HORIZONTAL_XMIN              0x00000FFF
+#       define NV097_SET_WINDOW_CLIP_HORIZONTAL_XMAX              0x0FFF0000
+#   define NV097_SET_WINDOW_CLIP_VERTICAL                     0x009702E0
 #   define NV097_SET_ALPHA_TEST_ENABLE                        0x00970300
 #   define NV097_SET_BLEND_ENABLE                             0x00970304
 #   define NV097_SET_CULL_FACE_ENABLE                         0x00970308
@@ -3020,6 +3045,41 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
 
     glUseProgram(pg->shader_binding->gl_program);
 
+    /* Clipping regions */
+    bool exclusive = pg->regs[NV_PGRAPH_SETUPRASTER]
+                         & NV_PGRAPH_SETUPRASTER_WINDOWCLIPTYPE;
+
+    GLint clip_exclusive_loc = glGetUniformLocation(
+                                                 pg->shader_binding->gl_program,
+                                                         "clipRegionExclusive");
+    if (clip_exclusive_loc != -1) {
+        glUniform1i(clip_exclusive_loc, (GLint)exclusive);
+    }
+
+    for (i = 0; i< 8; i++) {
+        char name[32];
+
+        uint32_t x = pg->regs[NV_PGRAPH_WINDOWCLIPX0 + i * 4];
+        GLint xmin = GET_MASK(x, NV_PGRAPH_WINDOWCLIPX0_XMIN);
+        GLint xmax = GET_MASK(x, NV_PGRAPH_WINDOWCLIPX0_XMAX);
+        uint32_t y = pg->regs[NV_PGRAPH_WINDOWCLIPY0 + i * 4];
+        GLint ymin = pg->surface_shape.clip_height - 1 -
+                     GET_MASK(y, NV_PGRAPH_WINDOWCLIPX0_XMIN);
+        GLint ymax = pg->surface_shape.clip_height - 1 -
+                     GET_MASK(y, NV_PGRAPH_WINDOWCLIPX0_XMAX);
+
+        NV2A_GL_DPRINTF(false, "Setting window clip %d [%d %d, %d %d] %s",
+                        i, xmin, xmax, ymin, ymax,
+                        exclusive ? "Exclusive" : "Inclusive");
+
+        snprintf(name, sizeof(name), "clipRegion[%d]", i);
+        GLint loc = glGetUniformLocation(pg->shader_binding->gl_program, name);
+        if (loc != -1) {
+            glUniform4i(loc, xmin, ymax, xmax, ymin);
+        }
+    }
+
+
 
     /* update combiner constants */
     for (i = 0; i<= 8; i++) {
@@ -4306,6 +4366,22 @@ static void pgraph_method(NV2AState *d,
         SET_MASK(pg->regs[NV_PGRAPH_FOGCOLOR], NV_PGRAPH_FOGCOLOR_ALPHA, alpha);
         break;
     }
+
+    case NV097_SET_WINDOW_CLIP_TYPE:
+        SET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
+                 NV_PGRAPH_SETUPRASTER_WINDOWCLIPTYPE, parameter);
+        break;
+    case NV097_SET_WINDOW_CLIP_HORIZONTAL ...
+            NV097_SET_WINDOW_CLIP_HORIZONTAL + 0x1c:
+        slot = (class_method - NV097_SET_WINDOW_CLIP_HORIZONTAL) / 4;
+        pg->regs[NV_PGRAPH_WINDOWCLIPX0 + slot * 4] = parameter;
+        break;
+    case NV097_SET_WINDOW_CLIP_VERTICAL ...
+            NV097_SET_WINDOW_CLIP_VERTICAL + 0x1c:
+        slot = (class_method - NV097_SET_WINDOW_CLIP_VERTICAL) / 4;
+        pg->regs[NV_PGRAPH_WINDOWCLIPY0 + slot * 4] = parameter;
+        break;
+
     case NV097_SET_ALPHA_TEST_ENABLE:
         SET_MASK(pg->regs[NV_PGRAPH_CONTROL_0],
                  NV_PGRAPH_CONTROL_0_ALPHATESTENABLE, parameter);
@@ -5665,6 +5741,8 @@ static void pgraph_method(NV2AState *d,
 
         /* FIXME: Should this really be inverted instead of ymin? */
         glScissor(scissor_x, scissor_y, scissor_width, scissor_height);
+
+        /* FIXME: Respect window clip?!?! */
 
         NV2A_DPRINTF("------------------CLEAR 0x%x %d,%d - %d,%d  %x---------------\n",
             parameter, xmin, ymin, xmax, ymax, d->pgraph.regs[NV_PGRAPH_COLORCLEARVALUE]);
