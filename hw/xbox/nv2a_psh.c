@@ -564,6 +564,7 @@ static QString* psh_convert(struct PixelShader *ps)
                                i);
             break;
         case PS_TEXTUREMODES_PROJECT2D:
+            /* tex */
             if (ps->state.rect_tex[i]) {
                 sampler_type = "sampler2DRect";
             } else {
@@ -573,34 +574,37 @@ static QString* psh_convert(struct PixelShader *ps)
                                i, i, i);
             break;
         case PS_TEXTUREMODES_PROJECT3D:
+            /* tex */
             sampler_type = "sampler3D";
             qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
                                i, i, i);
             break;
         case PS_TEXTUREMODES_CUBEMAP:
+            /* tex */
             sampler_type = "samplerCube";
             qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, pT%d.xyz / pT%d.w);\n",
                                i, i, i, i);
             break;
         case PS_TEXTUREMODES_PASSTHRU:
+            /* texcoord */
             qstring_append_fmt(vars, "vec4 t%d = pT%d;\n", i, i);
             break;
-        case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
-            assert(false);
-            break;
         case PS_TEXTUREMODES_DPNDNT_AR:
+            /* texreg2ar */
             assert(!ps->state.rect_tex[i]);
             sampler_type = "sampler2D";
             qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%d.ar);\n",
                                i, i, ps->input_tex[i]);
             break;
         case PS_TEXTUREMODES_DPNDNT_GB:
+            /* texreg2bg */
             assert(!ps->state.rect_tex[i]);
             sampler_type = "sampler2D";
             qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%d.gb);\n",
                                i, i, ps->input_tex[i]);
             break;
         case PS_TEXTUREMODES_BUMPENVMAP_LUM:
+            /* texbeml */
             qstring_append_fmt(preflight, "uniform float bumpScale%d;\n", i);
             qstring_append_fmt(preflight, "uniform float bumpOffset%d;\n", i);
             qstring_append_fmt(ps->code, "/* BUMPENVMAP_LUM for stage %d */\n", i);
@@ -608,6 +612,7 @@ static QString* psh_convert(struct PixelShader *ps)
                                i, i, i, ps->input_tex[i], i);
             /* No break here! Extension of BUMPENVMAP */
         case PS_TEXTUREMODES_BUMPENVMAP:
+            /* texbem */
             assert(!ps->state.rect_tex[i]);
             sampler_type = "sampler2D";
             qstring_append_fmt(preflight, "uniform mat2 bumpMat%d;\n", i);
@@ -616,6 +621,7 @@ static QString* psh_convert(struct PixelShader *ps)
                                i, i, i, ps->input_tex[i], i, i);
             break;
         case PS_TEXTUREMODES_CLIPPLANE: {
+            /* texkill */
             int j;
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_CLIPPLANE */\n",
                                i);
@@ -626,9 +632,70 @@ static QString* psh_convert(struct PixelShader *ps)
             }
             break;
         }
+        case PS_TEXTUREMODES_DOT_ST:
+            /* texm3x2tex */
+            assert(i >= 2);
+            qstring_append_fmt(vars, "float tmpV%d = dot(pT%d.xyz, t%d.rgb);",
+                               i, i, ps->input_tex[i]);
+
+            assert(!ps->state.rect_tex[i]);
+            sampler_type = "sampler2D";
+            qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, vec2(t%d.x, tmpV%d));\n",
+                               i, i, i - 1, i);
+
+            break;
+        case PS_TEXTUREMODES_DOT_ZW:
+            /* texm3x2depth */
+            assert(i >= 2);
+            qstring_append_fmt(vars, "float tmpW%d = dot(pT%d.xyz, t%d.rgb);",
+                               i, i, ps->input_tex[i]);
+
+            /* FIXME: we need to write the depth value here, however, we must
+             *        know about the xbox framebuffer depth range etc to scale
+             *        it?!
+             *
+             *        The basic formula should be:
+             *        ...("gl_FragDepth = t%d.x / tmpW%d\n", i - 1, i);
+             */
+            /* FIXME: is t%d.x correct? Or maybe use another component? If the
+             *        previous stage is texm3x2pad it doesn't matter, however,
+             *        if it is not, it DOES - or would the hw crash or behave
+             *        differently?
+             */
+
+            qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* texm3x2depth */\n",
+                               i);
+            //assert(false);
+            break;
         case PS_TEXTUREMODES_DOTPRODUCT:
             qstring_append_fmt(vars, "vec4 t%d = vec4(dot(pT%d.xyz, t%d.rgb));\n",
                                i, i, ps->input_tex[i]);
+            break;
+        case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
+        case PS_TEXTUREMODES_DOT_RFLCT_DIFF: {
+            /* Normal = (s,t,r) Eye-Vector stored in C0 */
+            /* FIXME: vec4?! */
+            QString* c0 = get_var(ps, PS_REGISTER_C0, false);
+            qstring_append_fmt(vars, "vec3 eyeVector%d = %s.xyz;\n", i, qstring_get_str(c0)); /* FIXME: Is this correct? */
+            QDECREF(c0);
+            qstring_append_fmt(vars, "vec3 reflect%d =  2.0 * pT%d.xyz * dot(pT%d.xyz, eyeVector%d) / dot(pT%d.xyz, pT%d.xyz) - eyeVector%d;\n",
+                               i, i, i, i, i, i, i);
+            sampler_type = "samplerCube";
+            qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, reflect%d);\n",
+                               i, i, i);
+            break;
+        }
+        case PS_TEXTUREMODES_DOT_RFLCT_SPEC_CONST:
+            /* texm3x3spec */
+
+            /* Normal = (s,t,r) Eye-Vector from q components */
+            /* FIXME: vec4?! */
+            qstring_append_fmt(vars, "vec3 eyeVector%d = vec3(pT0.w, pT1.w, pT2.w);\n", i);
+            qstring_append_fmt(vars, "vec3 reflect%d =  2.0 * pT%d.xyz * dot(pT%d.xyz, eyeVector%d) / dot(pT%d.xyz, pT%d.xyz) - eyeVector%d;\n",
+                               i, i, i, i, i, i, i);
+            sampler_type = "samplerCube";
+            qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, reflect%d);\n",
+                               i, i, i);
             break;
         default:
             printf("%x\n", ps->tex_modes[i]);
