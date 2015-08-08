@@ -248,6 +248,8 @@ void xbox_init_common(QEMUMachineInitArgs *args,
     *out_isa_bus = isa_bus;
 }
 
+#include "kernel_hle.h"
+
 static void xbox_init(QEMUMachineInitArgs *args)
 {
 #if 0
@@ -329,6 +331,7 @@ static void xbox_init(QEMUMachineInitArgs *args)
 
     ISABus *isa_bus;
     xbox_init_common(args, eeprom, &isa_bus);
+    init_kernel_hle();
 }
 
 static QEMUMachine xbox_machine = {

@@ -138,8 +138,8 @@ static uint8_t smc_read_data(SMBusDevice *dev, uint8_t cmd, int n)
             return SMC_REG_AVPACK_COMPOSITE;
 
         case SMC_REG_SCRATCH:
-            return 0;
-            // return SMC_REG_SCRATCH_SHORT_ANIMATION;
+            // return 0;
+            return SMC_REG_SCRATCH_SHORT_ANIMATION;
 
         /* challenge request:
          * must be non-0 */
