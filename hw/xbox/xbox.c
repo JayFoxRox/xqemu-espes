@@ -117,6 +117,8 @@ bios_error:
 
 }
 
+#include "kernel_hle.h"
+
 /* mostly from pc_init1 */
 void xbox_init_common(QEMUMachineInitArgs *args,
                       const uint8_t *default_eeprom,
@@ -246,9 +248,12 @@ void xbox_init_common(QEMUMachineInitArgs *args,
     nv2a_init(agp_bus, PCI_DEVFN(0, 0), ram_memory);
 
     *out_isa_bus = isa_bus;
-}
 
-#include "kernel_hle.h"
+
+    /* Software HLE Hack */
+    init_kernel_hle(ram_memory);
+
+}
 
 static void xbox_init(QEMUMachineInitArgs *args)
 {
@@ -331,7 +336,6 @@ static void xbox_init(QEMUMachineInitArgs *args)
 
     ISABus *isa_bus;
     xbox_init_common(args, eeprom, &isa_bus);
-    init_kernel_hle();
 }
 
 static QEMUMachine xbox_machine = {

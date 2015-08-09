@@ -16,6 +16,9 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
+
+#define DEBUG_GDB
+
 #include "config.h"
 #include "qemu-common.h"
 #ifdef CONFIG_USER_ONLY
@@ -637,6 +640,8 @@ static int gdb_breakpoint_insert(target_ulong addr, target_ulong len, int type)
     CPUState *cpu;
     CPUArchState *env;
     int err = 0;
+
+assert(false);
 
     if (kvm_enabled()) {
         return kvm_insert_breakpoint(gdbserver_state->c_cpu, addr, len, type);
