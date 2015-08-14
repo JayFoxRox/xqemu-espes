@@ -744,6 +744,52 @@ static void parse_combiner_output(uint32_t value, struct OutputInfo *out)
     out->cd_alphablue = flags & 0x40;
 }
 
+enum PshSampler psh_texture_sampler(unsigned int stage,
+                                    uint32_t shader_stage_program,
+                                    bool rect_tex)
+{
+    assert(stage < 4);
+    unsigned int mode = (shader_stage_program >> (stage * 5)) & 0x1F;
+
+    enum PshSampler sampler_2d = rect_tex ? SAMPLER_2D_RECT : SAMPLER_2D;
+
+    switch(mode) {
+    case PS_TEXTUREMODES_NONE: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_PROJECT2D: return sampler_2d;
+    case PS_TEXTUREMODES_PROJECT3D:
+        /* FIXME: Support shadowbuffer */
+        if (false) {
+            return rect_tex ? SAMPLER_2D_RECT_SHADOW : SAMPLER_2D_SHADOW;
+        } else {
+            return SAMPLER_3D;
+        }
+    case PS_TEXTUREMODES_CUBEMAP: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_PASSTHRU: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_CLIPPLANE: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_BUMPENVMAP: return sampler_2d;
+    case PS_TEXTUREMODES_BUMPENVMAP_LUM: return sampler_2d;
+    case PS_TEXTUREMODES_BRDF: return SAMPLER_3D;
+    case PS_TEXTUREMODES_DOT_ST:
+        /* FIXME: Maybe NONE? */
+        return sampler_2d;
+    case PS_TEXTUREMODES_DOT_ZW: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_DOT_RFLCT_DIFF: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_DOT_RFLCT_SPEC: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_DOT_STR_3D:
+        /* FIXME: also cubemap support? */
+        return SAMPLER_3D;
+    case PS_TEXTUREMODES_DOT_STR_CUBE: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_DPNDNT_AR: return sampler_2d;
+    case PS_TEXTUREMODES_DPNDNT_GB: return sampler_2d;
+    case PS_TEXTUREMODES_DOTPRODUCT: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_DOT_RFLCT_SPEC_CONST: return SAMPLER_CUBEMAP;
+    default:
+        assert(false);
+        break;
+    }
+    return SAMPLER_NONE;
+}
+
 QString *psh_translate(const PshState state)
 {
     int i;

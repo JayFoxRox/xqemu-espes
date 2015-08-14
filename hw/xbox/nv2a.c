@@ -1462,6 +1462,13 @@ static void pgraph_bind_textures(NV2AState *d)
         unsigned int dimensionality =
             GET_MASK(fmt, NV_PGRAPH_TEXFMT0_DIMENSIONALITY);
         unsigned int color_format = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_COLOR);
+
+        /* Check the pixel combiner if this texture needs to be fetched */
+        enum PshSampler sampler =
+            psh_texture_sampler(i, pg->regs[NV_PGRAPH_SHADERPROG],
+                                kelvin_color_format_map[color_format].linear);
+
+
         unsigned int levels = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_MIPMAP_LEVELS);
         unsigned int log_width = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_U);
         unsigned int log_height = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_V);
@@ -1517,9 +1524,11 @@ static void pgraph_bind_textures(NV2AState *d)
         glBindTexture(GL_TEXTURE_1D, 0);
         glBindTexture(GL_TEXTURE_2D, 0);
         glBindTexture(GL_TEXTURE_3D, 0);
-        if (!enabled) {
+        if (!enabled || sampler == SAMPLER_NONE) {
             continue;
         }
+
+        /* FIXME: Verify sampler and gl_target match! */
 
         if (!pg->texture_dirty[i] && pg->texture_binding[i]) {
             glBindTexture(pg->texture_binding[i]->gl_target,
