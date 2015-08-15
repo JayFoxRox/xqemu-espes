@@ -2322,6 +2322,8 @@ static TextureBinding* generate_texture(const TextureShape s,
              NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT)) {
         glTexParameteri(gl_target, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
         glTexParameteri(gl_target, GL_TEXTURE_COMPARE_FUNC, GL_GEQUAL);
+
+glTexParameteri(gl_target, GL_TEXTURE_COMPARE_MODE, GL_NONE);
     }
 
     if (f.gl_swizzle_mask[0] != 0 || f.gl_swizzle_mask[1] != 0

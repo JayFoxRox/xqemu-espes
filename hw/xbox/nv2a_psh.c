@@ -591,24 +591,39 @@ static QString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_PROJECT3D:
             /* tex */
-#if 0
+#if 0 // if not depth component
             sampler_type = "sampler3D";
             qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
                                i, i, i);
-#else
-#if 0
-            sampler_type = "sampler2DShadow";
-            qstring_append_fmt(vars, "vec4 t%d = vec4(texture(texSamp%d, pT%d.xyw));\n",
-                               i, i, i);
-#else
-//            assert(!ps->rect_tex[i]);
-//            sampler_type = "sampler2D";
+#else // depth component textures
+
+            sampler_type = "sampler2DRectShadow";
+#if 1
+            // Visualize lightmap
             sampler_type = "sampler2DRect";
-            qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyw);\n",
+            qstring_append_fmt(vars, "vec4 t%d_obj_dist = vec4(texture(texSamp%d, vec2("
+"pT%d.xy / pT%d.w"
+//",pT%d.z / pT%d.w * 1000000000000.0"
+")).xxxx);\n",
+                               i, i,
+                               i, i
+                               //,i, i
+                               );
+            // Visualize eye distance
+            qstring_append_fmt(vars, "vec4 t%d_eye_dist = vec4(pT%d.z / pT%d.w / 65535.0);\n",
+                               i,i,i);
+
+            qstring_append_fmt(vars, "vec4 t%d = vec4(t%d_eye_dist.x < t%d_obj_dist.x ? 1.0 : 0.0);\n",
+                               i,i,i);            
+#else
+            qstring_append_fmt(vars, "vec2 uv%d = pT%d.xy / pT%d.w;\n",
                                i, i, i);
-            qstring_append_fmt(ps->code, "t%d = vec4(0.0); t0 = t1;\n",
-                               i);
+            qstring_append_fmt(vars, "uv%d /= vec2(textureSize(texSamp%d).xy);\n",
+                               i, i);
+            qstring_append_fmt(vars, "vec4 t%d = vec4(any(greaterThan(abs(uv%d - 0.5),vec2(0.499))));\n",
+                               i, i);
 #endif
+
 #endif
             break;
         case PS_TEXTUREMODES_CUBEMAP:
