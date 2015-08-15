@@ -589,43 +589,80 @@ static QString* psh_convert(struct PixelShader *ps)
             qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyw);\n",
                                i, i, i);
             break;
-        case PS_TEXTUREMODES_PROJECT3D:
+        case PS_TEXTUREMODES_PROJECT3D: {
             /* tex */
-#if 0 // if not depth component
-            sampler_type = "sampler3D";
-            qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
-                               i, i, i);
-#else // depth component textures
 
-            sampler_type = "sampler2DRectShadow";
+            enum PshDepthMode depth_mode = DEPTH_MODE_F16; //FIXME: PS input
+
+            if (depth_mode == DEPTH_MODE_NONE) {
+                sampler_type = "sampler3D";
+                qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
+                                   i, i, i);
+            } else {
+
+                float depth_max;
+
+                switch(depth_mode) {
+                    case DEPTH_MODE_D16:
+                        depth_max = 65535.0f;
+                        break;
+                    case DEPTH_MODE_D24:
+                        depth_max = 16777215.0f;
+                        break;
+                    case DEPTH_MODE_F16:
+                        /* Xbox apps only use 511.9375
+                         * https://www.opengl.org/registry/specs/NV/half_float.txt
+                         * => sign = 0
+                         * => bias = 2^(5-1)-1 = 15
+                         * => mantissa = 2^(10-1) = 1023
+                         * => 0 11110 1111111111
+                         * max = sign * 2^bias * (1 + mantissa / (mantissa+1))
+                         *     =   +1 * 2^15   * (1 + 1023 / (1023 + 1))
+                         */
+                        depth_max = 65504.0f;
+                        break;
+                    case DEPTH_MODE_F24:
+                        /* Xbox apps only use 1E+30
+                         * 1 sign, 8 exponent, 15 mantissa ? [FIXME: not sure..]
+                         * => sign = 0
+                         * => bias = 2^(8-1)-1 = 127
+                         * => mantissa = 2^(15-1) = 32767
+                         * => 0 11111110 111111111111111
+                         * max = sign * 2^bias * (1 + mantissa / (mantissa+1))
+                         *     =   +1 * 2^127   * (1 + 32767 / (32767 + 1))
+                         */
+                        depth_max = 3.4027717e38f;
+                        break;
+                    default:
+                        assert(false);
+                        break;
+                }
+
+                sampler_type = "sampler2DRectShadow";
 #if 1
-            // Visualize lightmap
-            sampler_type = "sampler2DRect";
-            qstring_append_fmt(vars, "vec4 t%d_obj_dist = vec4(texture(texSamp%d, vec2("
-"pT%d.xy / pT%d.w"
-//",pT%d.z / pT%d.w * 1000000000000.0"
-")).xxxx);\n",
-                               i, i,
-                               i, i
-                               //,i, i
-                               );
-            // Visualize eye distance
-            qstring_append_fmt(vars, "vec4 t%d_eye_dist = vec4(pT%d.z / pT%d.w / 65535.0);\n",
-                               i,i,i);
+                // Visualize lightmap
+                sampler_type = "sampler2DRect";
+                qstring_append_fmt(vars, "vec4 t%d_obj_dist = vec4(texture(texSamp%d, vec2("
+    "pT%d.xy / pT%d.w"
+    //",pT%d.z / pT%d.w * 1000000000000.0"
+    ")).xxxx);\n",
+                                   i, i,
+                                   i, i
+                                   //,i, i
+                                   );
 
-            qstring_append_fmt(vars, "vec4 t%d = vec4(t%d_eye_dist.x < t%d_obj_dist.x ? 1.0 : 0.0);\n",
-                               i,i,i);            
-#else
-            qstring_append_fmt(vars, "vec2 uv%d = pT%d.xy / pT%d.w;\n",
-                               i, i, i);
-            qstring_append_fmt(vars, "uv%d /= vec2(textureSize(texSamp%d).xy);\n",
-                               i, i);
-            qstring_append_fmt(vars, "vec4 t%d = vec4(any(greaterThan(abs(uv%d - 0.5),vec2(0.499))));\n",
-                               i, i);
-#endif
+                // Visualize eye distance
+                qstring_append_fmt(vars, "vec4 t%d_eye_dist = vec4(pT%d.z / pT%d.w / %f);\n",
+                                   i,i,i,depth_max);
+
+                // Do shadows ourself
+                qstring_append_fmt(vars, "vec4 t%d = vec4(t%d_eye_dist.x < t%d_obj_dist.x ? 1.0 : 0.0);\n",
+                                   i,i,i);
 
 #endif
+            }
             break;
+        }
         case PS_TEXTUREMODES_CUBEMAP:
             sampler_type = "samplerCube";
             qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, pT%d.xyz / pT%d.w);\n",
