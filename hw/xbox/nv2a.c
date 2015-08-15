@@ -2311,6 +2311,19 @@ static TextureBinding* generate_texture(const TextureShape s,
             s.levels - 1);
     }
 
+    /* Support depth texture comparisons */
+    if ((s.color_format ==
+             NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED) ||
+        (s.color_format ==
+             NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT) ||
+        (s.color_format ==
+             NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED) ||
+        (s.color_format ==
+             NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT)) {
+        glTexParameteri(gl_target, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+        glTexParameteri(gl_target, GL_TEXTURE_COMPARE_FUNC, GL_GEQUAL);
+    }
+
     if (f.gl_swizzle_mask[0] != 0 || f.gl_swizzle_mask[1] != 0
         || f.gl_swizzle_mask[2] != 0 || f.gl_swizzle_mask[3] != 0) {
         glTexParameteriv(gl_target, GL_TEXTURE_SWIZZLE_RGBA,
