@@ -590,9 +590,26 @@ static QString* psh_convert(struct PixelShader *ps)
                                i, i, i);
             break;
         case PS_TEXTUREMODES_PROJECT3D:
+            /* tex */
+#if 0
             sampler_type = "sampler3D";
             qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
                                i, i, i);
+#else
+#if 0
+            sampler_type = "sampler2DShadow";
+            qstring_append_fmt(vars, "vec4 t%d = vec4(texture(texSamp%d, pT%d.xyw));\n",
+                               i, i, i);
+#else
+//            assert(!ps->rect_tex[i]);
+//            sampler_type = "sampler2D";
+            sampler_type = "sampler2DRect";
+            qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyw);\n",
+                               i, i, i);
+            qstring_append_fmt(ps->code, "t%d = vec4(0.0); t0 = t1;\n",
+                               i);
+#endif
+#endif
             break;
         case PS_TEXTUREMODES_CUBEMAP:
             sampler_type = "samplerCube";
