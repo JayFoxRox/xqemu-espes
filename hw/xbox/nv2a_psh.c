@@ -177,7 +177,7 @@ struct FCInputInfo {
     int c0, c1;
     //uint32_t c0_value, c1_value;
     bool c0_used, c1_used;
-    bool v1r0_sum, clamp_sum, inv_v1, inv_r0, enabled;
+    bool clamp_sum, inv_v1, inv_r0, enabled;
 };
 
 struct OutputInfo {
@@ -509,6 +509,18 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     QString *c = get_input_var(ps, final.c, false);
     QString *d = get_input_var(ps, final.d, false);
     QString *g = get_input_var(ps, final.g, false);
+
+if (final.inv_r0) {
+    qstring_append(ps->code, "/* FIXME: inv_r0 */\n");
+}
+if (final.inv_v1) {
+    qstring_append(ps->code, "/* FIXME: inv_v1 */\n");
+}
+if (final.clamp_sum) {
+    qstring_append(ps->code, "/* FIXME: clamp_sum */\n");
+}
+qstring_append_fmt(ps->code, "/* final.g = 0x%X */\n", final.g);
+
 
     add_var_ref(ps, "r0");
     qstring_append_fmt(ps->code, "r0.rgb = %s + mix(vec3(%s), vec3(%s), vec3(%s));\n",
