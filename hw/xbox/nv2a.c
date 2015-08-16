@@ -4915,6 +4915,7 @@ static void pgraph_method(NV2AState *d,
     }
 
     CASE_4(NV097_SET_TEXTURE_BORDER_COLOR, 64):
+        slot = (class_method - NV097_SET_TEXTURE_BORDER_COLOR) / 64;
         pg->regs[NV_PGRAPH_BORDERCOLOR0 + slot * 4] = parameter;
         break;
     CASE_4(NV097_SET_TEXTURE_SET_BUMP_ENV_MAT + 0x0, 64):
