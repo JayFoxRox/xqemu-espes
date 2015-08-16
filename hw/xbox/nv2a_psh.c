@@ -601,7 +601,7 @@ static QString* psh_convert(struct PixelShader *ps)
                 assert(ps->rect_tex[i]);
 #if 1
                 sampler_type = "sampler2DRectShadow";
-                qstring_append_fmt(vars, "vec4 t%d = vec4(1.0 - textureProj(texSamp%d, pT%d.xyzw / vec4(1.0, 1.0, %f, 1.0)));",
+                qstring_append_fmt(vars, "vec4 t%d = vec4(textureProj(texSamp%d, pT%d.xyzw / vec4(1.0, 1.0, %f, 1.0)));",
                                    i,i,i,i,ps->depth_limit[i]);
 #else
                 // Visualize lightmap

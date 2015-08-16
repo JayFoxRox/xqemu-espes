@@ -425,6 +425,16 @@
 #define NV_PGRAPH_SHADERCLIPMODE                         0x00001994
 #define NV_PGRAPH_SHADERCTL                              0x00001998
 #define NV_PGRAPH_SHADERPROG                             0x0000199C
+#define NV_PGRAPH_SHADOWCTL                              0x000019A4
+#   define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC                     0x00000007
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_NEVER                0
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_LESS                 1
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_EQUAL                2
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_LEQUAL               3
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_GREATER              4
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_NOTEQUAL             5
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_GEQUAL               6
+#       define NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC_ALWAYS               7
 #define NV_PGRAPH_SPECFOGFACTOR0                         0x000019AC
 #define NV_PGRAPH_SPECFOGFACTOR1                         0x000019B0
 #define NV_PGRAPH_TEXADDRESS0                            0x000019BC
@@ -978,6 +988,15 @@
 #   define NV097_SET_SPECULAR_FOG_FACTOR                      0x00971E20
 #   define NV097_SET_COMBINER_COLOR_OCW                       0x00971E40
 #   define NV097_SET_COMBINER_CONTROL                         0x00971E60
+#   define NV097_SET_SHADOW_DEPTH_FUNC                        0x00971E6C
+#       define NV097_SET_SHADOW_DEPTH_FUNC_NEVER                    0
+#       define NV097_SET_SHADOW_DEPTH_FUNC_LESS                     1
+#       define NV097_SET_SHADOW_DEPTH_FUNC_EQUAL                    2
+#       define NV097_SET_SHADOW_DEPTH_FUNC_LEQUAL                   3
+#       define NV097_SET_SHADOW_DEPTH_FUNC_GREATER                  4
+#       define NV097_SET_SHADOW_DEPTH_FUNC_NOTEQUAL                 5
+#       define NV097_SET_SHADOW_DEPTH_FUNC_GEQUAL                   6
+#       define NV097_SET_SHADOW_DEPTH_FUNC_ALWAYS                   7
 #   define NV097_SET_SHADER_STAGE_PROGRAM                     0x00971E70
 #   define NV097_SET_SHADER_OTHER_STAGE_INPUT                 0x00971E78
 #   define NV097_SET_TRANSFORM_EXECUTION_MODE                 0x00971E94
@@ -1101,6 +1120,19 @@ static const GLenum pgraph_depth_func_map[] = {
     GL_NOTEQUAL,
     GL_GEQUAL,
     GL_ALWAYS,
+};
+
+/* GL and Xbox do things the other way around = this table inverts the op! */
+/* FIXME: Might also be a bug in the Z calculation?! */
+static const GLenum pgraph_shadow_zfunc_map[] = {
+    GL_ALWAYS, /* NEVER */
+    GL_GEQUAL, /* LESS */
+    GL_NOTEQUAL, /* EQUAL */
+    GL_GREATER, /* LEQUAL */
+    GL_LEQUAL, /* GREATER */
+    GL_EQUAL, /* NOTEQUAL */
+    GL_LESS, /* GEQUAL */
+    GL_NEVER, /* ALWAYS */
 };
 
 static const GLenum pgraph_stencil_func_map[] = {
@@ -2386,8 +2418,8 @@ static TextureBinding* generate_texture(const TextureShape s,
              NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED) ||
         (s.color_format ==
              NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT)) {
+
         glTexParameteri(gl_target, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-        glTexParameteri(gl_target, GL_TEXTURE_COMPARE_FUNC, GL_GEQUAL);
     }
 
     if (f.gl_swizzle_mask[0] != 0 || f.gl_swizzle_mask[1] != 0
@@ -2446,6 +2478,12 @@ static void pgraph_bind_textures(NV2AState *d)
     PGRAPHState *pg = &d->pgraph;
 
     NV2A_GL_DGROUP_BEGIN("%s", __func__);
+
+    /* FIXME: Only get for shadow textures? */
+    unsigned int shadow_zfunc = GET_MASK(pg->regs[NV_PGRAPH_SHADOWCTL],
+                                         NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC);
+    assert(shadow_zfunc < ARRAYSIZE(pgraph_shadow_zfunc_map));
+    GLint gl_shadow_zfunc = pgraph_shadow_zfunc_map[shadow_zfunc];
 
     for (i=0; i<NV2A_MAX_TEXTURES; i++) {
 
@@ -2746,6 +2784,11 @@ static void pgraph_bind_textures(NV2AState *d)
             glTexParameteri(binding->gl_target, GL_TEXTURE_WRAP_R,
                 pgraph_texture_addr_map[addrp]);
         }
+
+        /* Shadow func */
+        /* FIXME: Only set for depth textures? */
+        glTexParameteri(binding->gl_target, GL_TEXTURE_COMPARE_FUNC,
+            gl_shadow_zfunc);
 
         /* FIXME: Only upload if necessary? [s, t or r = GL_CLAMP_TO_BORDER] */
         if (border_source == NV_PGRAPH_TEXFMT0_BORDER_SOURCE_COLOR) {
@@ -5251,6 +5294,12 @@ static void pgraph_method(NV2AState *d,
 
     case NV097_SET_COMBINER_CONTROL:
         pg->regs[NV_PGRAPH_COMBINECTL] = parameter;
+        break;
+
+    case NV097_SET_SHADOW_DEPTH_FUNC:
+        SET_MASK(pg->regs[NV_PGRAPH_SHADOWCTL],
+                 NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC,
+                 parameter);
         break;
 
     case NV097_SET_SHADER_STAGE_PROGRAM:
