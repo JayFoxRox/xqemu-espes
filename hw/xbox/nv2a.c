@@ -1903,7 +1903,15 @@ static float pgraph_texture_depth_limit(unsigned int color_format) {
          * max = sign * 2^bias * (1 + mantissa / (mantissa+1))
          *     =   +1 * 2^127   * (1 + 32767 / (32767 + 1))
          */
+#if 1
+        /* This is a hack to work around precision / rounding issues
+         * Ideally we find ways to work around this issue differently..
+         * There is also NV_depth_buffer_float but that's vendor specific.
+         */
+        return 1.0e32f;
+#else
         return 3.4027717e38f;
+#endif
     case NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED:
         return 65535.0f;
     case NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT:
@@ -1922,23 +1930,23 @@ static float pgraph_texture_depth_limit(unsigned int color_format) {
     }
 }
 
-static float pgraph_surface_depth_limit(unsigned int zeta_format, bool fixed)
+static float pgraph_surface_depth_limit(const SurfaceShape s)
 {
-    switch(zeta_format) {
+    switch(s.zeta_format) {
     case 0:
         return 0.0f;
     case NV097_SET_SURFACE_FORMAT_ZETA_Z16:
         return pgraph_texture_depth_limit(
-                  fixed ?
-                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED
+                  s.z_format ?
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT
                         :
-                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT);
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED);
     case NV097_SET_SURFACE_FORMAT_ZETA_Z24S8:
         return pgraph_texture_depth_limit(
-                  fixed ? 
-                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED
+                  s.z_format ?
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT
                         :
-                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT);
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED);
     default:
         assert(false);
     }
@@ -2124,6 +2132,7 @@ static void convert_yuy2_to_rgb(const uint8_t *line, unsigned int ix,
     *b = cliptobyte((298 * c + 516 * d + 128) >> 8);
 }
 
+/* Convert Xbox to GL */
 static uint8_t* convert_texture_data(const TextureShape s,
                                      const uint8_t *data,
                                      const uint8_t *palette_data,
@@ -2179,6 +2188,68 @@ static uint8_t* convert_texture_data(const TextureShape s,
             }
         }
         return converted_data;
+    } else if (s.color_format
+                == NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT) {
+        assert(depth == 1); /* FIXME */
+        uint8_t* converted_data = g_malloc(width * height * 8);
+        int x, y;
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++) {
+                uint32_t zeta = *(uint32_t*)(data + y * row_pitch + x * 4);
+                uint32_t* pixel = (uint32_t*)&converted_data[
+                                                           (y * width + x) * 8];
+                pixel[0] = zeta & 0xFFFFFF00; /* Depth */
+                pixel[1] = zeta & 0xFF; /* Unused + Stencil */
+            }
+        }
+        return converted_data;
+    } else {
+        return NULL;
+    }
+}
+
+/* If data is NULL this will only allocate a buffer. Else: Converts */
+static uint8_t* convert_surface_data(const SurfaceShape s,
+                                     const uint8_t *data,
+                                     unsigned int width,
+                                     unsigned int height,
+                                     unsigned int pitch,
+                                     bool upload,
+                                     bool color)
+{
+
+    if (!color && s.zeta_format == NV097_SET_SURFACE_FORMAT_ZETA_Z24S8 &&
+                                                                   s.z_format) {
+        if (upload) {
+            /* Convert Xbox to GL */
+            /* FIXME: Maybe should be a feature of the tex convert functions? */
+            if (data == NULL) {
+                return g_malloc(width * height * 8);
+            }
+            /* We reuse the texture conversion routine */
+            TextureShape s = { .color_format =
+                   NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT };
+            return convert_texture_data(s, data, NULL,
+                                        width, height, 1,
+                                        pitch, 0);
+        } else {
+            /* Convert GL to Xbox */
+            uint8_t* converted_data = g_malloc(pitch * height);
+            if (data == NULL) { return converted_data; }
+            int x, y;
+            for (y = 0; y < height; y++) {
+                for (x = 0; x < width; x++) {
+
+                    uint32_t* pixel = (uint32_t*)(data + (y * width + x) * 8);
+                    uint32_t* zeta = (uint32_t*)&converted_data[
+                                                             y * pitch + x * 4];
+                    *zeta = (pixel[0] & 0xFFFFFF00) /* Depth */
+                           | (pixel[1] & 0xFF); /* Stencil */
+
+                }
+            }
+            return converted_data;
+        }
     } else {
         return NULL;
     }
@@ -3096,8 +3167,7 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
     float zclip_max = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMAX];
     float zclip_min = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMIN];
 
-    float depth_max = pgraph_surface_depth_limit(pg->surface_shape.zeta_format,
-                                                 !pg->surface_shape.z_format);
+    float depth_max = pgraph_surface_depth_limit(pg->surface_shape);
 
     if (fixed_function) {
         /* update fixed function composite matrix */
@@ -3242,7 +3312,6 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
             gl_format = GL_DEPTH_STENCIL;
             gl_attachment = GL_DEPTH_STENCIL_ATTACHMENT;
             if (pg->surface_shape.z_format) {
-                assert(false);
                 gl_type = GL_FLOAT_32_UNSIGNED_INT_24_8_REV;
                 gl_internal_format = GL_DEPTH32F_STENCIL8;
             } else {
@@ -3337,11 +3406,21 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
                    width * bytes_per_pixel);
         }
 
+        uint8_t* converted = convert_surface_data(pg->surface_shape,
+                                                  flipped_buf,
+                                                  width, height,
+                                                  surface->pitch,
+                                                  true,
+                                                  color);
+
         glTexImage2D(GL_TEXTURE_2D, 0, gl_internal_format,
                      width, height, 0,
                      gl_format, gl_type,
-                     flipped_buf);
+                     converted ? converted : flipped_buf);
 
+        if (converted) {
+            g_free(converted);
+        }
         g_free(flipped_buf);
 
         glFramebufferTexture2D(GL_FRAMEBUFFER,
@@ -3357,7 +3436,6 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
                                         surface->pitch * height, true);
         }
         surface->buffer_dirty = false;
-
 
         uint8_t *out = data + surface->offset + 64;
         NV2A_DPRINTF("upload_surface %s 0x%" HWADDR_PRIx " - 0x%" HWADDR_PRIx ", "
@@ -3378,10 +3456,40 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
     if (!upload && surface->draw_dirty) {
         /* read the opengl framebuffer into the surface */
 
+        /* Allocate buffer for GL read */
+        uint8_t* convert_buffer = convert_surface_data(pg->surface_shape,
+                                                       NULL,
+                                                       width, height,
+                                                       surface->pitch,
+                                                       true,
+                                                       color);
+
+        /* FIXME: The hardcoded 8 is a hack for the F24 format,
+         *        bytes_per_pixel needs to be returned from converter or
+         *        format detection?
+         */
         glo_readpixels(gl_format, gl_type,
-                       bytes_per_pixel, surface->pitch,
+                       convert_buffer ? 8 : bytes_per_pixel,
+                       convert_buffer ? 8 * width : surface->pitch,
                        width, height,
-                       buf);
+                       convert_buffer ? convert_buffer : buf);
+
+        if (convert_buffer) {
+            /* Delete old buffer (intended for swizzle) */
+            if (swizzle) {
+                g_free(buf);
+            }
+            /* Create new buffer */
+            buf = convert_surface_data(pg->surface_shape,
+                                       convert_buffer,
+                                       width, height,
+                                       surface->pitch,
+                                       false,
+                                       color);
+            /* Remove buffer we used when reading GL data */
+            g_free(convert_buffer);
+        }
+
         assert(glGetError() == GL_NO_ERROR);
 
         if (swizzle) {
@@ -3390,6 +3498,21 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
                          data + surface->offset,
                          surface->pitch,
                          bytes_per_pixel);
+        }
+
+        /* Remove buffer (used for conv.) if swizzle won't remove it later */
+        if (convert_buffer && !swizzle) {
+            /* Copy buffer data to surface */
+            /* FIXME: We can save this step by writing to memory directly in the
+             *        converter
+             */
+            unsigned int y;
+            for(y = 0; y < height; y++) {
+                memcpy(data + surface->offset + y * surface->pitch,
+                       buf + y * width * bytes_per_pixel,
+                       width * bytes_per_pixel);
+            }
+            g_free(buf);
         }
 
         memory_region_set_client_dirty(d->vram,
@@ -5194,6 +5317,7 @@ static void pgraph_method(NV2AState *d,
                 d->pgraph.regs[NV_PGRAPH_ZSTENCILCLEARVALUE];
             GLint gl_clear_stencil;
             GLdouble gl_clear_depth;
+            /* FIXME: Is this correct for float formats?! */
             switch(pg->surface_shape.zeta_format) {
                 case NV097_SET_SURFACE_FORMAT_ZETA_Z16:
                     /* FIXME: Remove bit for stencil clear? */
