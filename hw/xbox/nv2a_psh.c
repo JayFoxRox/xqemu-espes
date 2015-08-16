@@ -202,6 +202,7 @@ struct PixelShader {
     //uint32_t dot_mapping, input_texture;
 
     bool rect_tex[4];
+    float depth_limit[4];
     bool compare_mode[4][4];
     bool alphakill[4];
 
@@ -591,11 +592,7 @@ static QString* psh_convert(struct PixelShader *ps)
             break;
         case PS_TEXTUREMODES_PROJECT3D: {
             /* tex */
-
-            float depth_limit = (float)0xFFFF; //FIXME: Pass as PS input
-            depth_limit = 65504.0f;
-
-            if (depth_limit == 0.0) {
+            if (ps->depth_limit[i] == 0.0) {
                 sampler_type = "sampler3D";
                 qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
                                    i, i, i);
@@ -616,7 +613,7 @@ static QString* psh_convert(struct PixelShader *ps)
 
                 // Visualize eye distance
                 qstring_append_fmt(vars, "vec4 t%d_eye_dist = vec4(pT%d.z / pT%d.w / %f);\n",
-                                   i,i,i,depth_limit);
+                                   i,i,i,ps->depth_limit[i]);
 
                 // Do shadows ourself
                 qstring_append_fmt(vars, "vec4 t%d = vec4(t%d_eye_dist.x < t%d_obj_dist.x ? 1.0 : 0.0);\n",
@@ -804,6 +801,7 @@ QString *psh_translate(uint32_t combiner_control, uint32_t shader_stage_program,
                        uint32_t final_inputs_0, uint32_t final_inputs_1,
                        /*uint32_t final_constant_0, uint32_t final_constant_1,*/
                        const bool rect_tex[4],
+                       const float depth_limit[4],
                        const bool compare_mode[4][4],
                        const bool alphakill[4],
                        bool alpha_test, enum PshAlphaFunc alpha_func)
@@ -817,6 +815,7 @@ QString *psh_translate(uint32_t combiner_control, uint32_t shader_stage_program,
     for (i = 0; i < 4; i++) {
         ps.tex_modes[i] = (shader_stage_program >> (i * 5)) & 0x1F;
         ps.rect_tex[i] = rect_tex[i];
+        ps.depth_limit[i] = depth_limit[i];
     }
 
     ps.alpha_test = alpha_test;

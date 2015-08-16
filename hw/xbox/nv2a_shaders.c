@@ -116,7 +116,6 @@ static QString* generate_fixed_function(const ShaderState state,
 
 
     qstring_append(s,
-"uniform mat4 invViewport;\n"
 "\n"
 "uniform vec3 surfaceSize;\n"
 "uniform vec2 clipRange;\n"
@@ -268,8 +267,6 @@ static QString* generate_fixed_function(const ShaderState state,
 
     qstring_append(s,
     "  vec4 oPos = tPosition * compositeMat;\n"
-    "vec4 OLD = oPos;"
-    //" oPos = invViewport * oPos;\n"
 
 #if 0
 // FFP
@@ -443,6 +440,7 @@ ShaderBinding* generate_shaders(const ShaderState state)
                    state.final_inputs_0, state.final_inputs_1,
                    /* final_constant_0, final_constant_1, */
                    state.rect_tex,
+                   state.depth_limit,
                    state.compare_mode,
                    state.alphakill,
                    state.alpha_test, state.alpha_func);

@@ -35,7 +35,7 @@
                            "};\n"
 
 #define VERTEX_TRANSFORM "/* Clip range */" \
-"  if (false && clipRange.y != clipRange.x) {\n" \
+"  if (clipRange.y != clipRange.x) {\n" \
 "    gl_ClipDistance[0] = (oPos.z + clipRange.x);\n" \
 "    gl_ClipDistance[1] = (-oPos.z + clipRange.y);\n" \
 "  } else {" \
@@ -49,7 +49,7 @@
 */ \
 "oPos.xyz = 2.0 * oPos.xyz / surfaceSize - 1.0;\n" \
 "oPos.y *= -1.0;\n" \
-/* HONESTLY: NO IDEA WHAT  I DO HERE, FOUND BY MESSING AROUND.. */ \
+/* HONESTLY: NO IDEA WHAT I DO HERE, FOUND BY MESSING AROUND.. */ \
 /* Z was [0,size] ???. GL needs [-1,+1].
  * First move to [-0.5,+0.5] then [-1.0,0.0]
  */ \

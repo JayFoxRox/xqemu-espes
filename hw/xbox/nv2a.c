@@ -2912,17 +2912,22 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
     }
 
     for (i = 0; i < 4; i++) {
-        state.rect_tex[i] = false;
         bool enabled = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4]
                          & NV_PGRAPH_TEXCTL0_0_ENABLE;
         unsigned int color_format =
             GET_MASK(pg->regs[NV_PGRAPH_TEXFMT0 + i*4],
                      NV_PGRAPH_TEXFMT0_COLOR);
 
+        /* FIXME: Only necessary if the unit is configured to fetch pixels */
         if (enabled && kelvin_color_format_map[color_format].linear) {
             state.rect_tex[i] = true;
+            state.depth_limit[i] = pgraph_texture_depth_limit(color_format);
+        } else {
+            state.rect_tex[i] = false;
+            state.depth_limit[i] = 0.0f;
         }
 
+        /* FIXME: Only necessary for texkill */
         for (j = 0; j < 4; j++) {
             state.compare_mode[i][j] =
                 (pg->regs[NV_PGRAPH_SHADERCLIPMODE] >> (4 * i + j)) & 1;
@@ -3061,60 +3066,6 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
                                             "compositeMat");
         if (comLoc != -1) {
             glUniformMatrix4fv(comLoc, 1, GL_FALSE, pg->composite_matrix);
-        }
-
-        /* estimate the viewport by assuming it matches the surface ... */
-        //FIXME: Get surface dimensions?
-        float m11 = 0.5 * pg->surface_shape.clip_width;
-        float m22 = -0.5 * pg->surface_shape.clip_height;
-        float m33 = (zclip_max - zclip_min) * depth_max;
-        //float m41 = m11;
-        //float m42 = -m22;
-        float m43 = zclip_min * depth_max;
-        //float m44 = 1.0;
-
-        if (m33 == 0.0) {
-            m33 = 1.0;
-        }
-        float invViewport[16] = {
-            1.0/m11, 0, 0, 0,
-            0, 1.0/m22, 0, 0,
-            0, 0, 1.0/m33, 0,
-            -1.0, 1.0, -m43/m33, 1.0
-        };
-
-/*
-
-    x = [-width*.5,+width*.5]
-    y = [+height*.5,-height*.5]
-    z = [0,depth_limit]
-    w = ???
-
-x = x/(width*.5)
-y = y/(height*.5)
-z = z/zrange
-w = -x + y + -z*zmin/zrange + w
-
-ACTUALLY:
-
-x = x/(width*.5) - w
-y = y/(height*.5) + w
-z = z/zrange -w*zmin/zrange
-w = w
-
-z = z * 2.0 - w // FIXME: JFR: WHY?!
-
-    x = [-1,1]
-    y = [-1,1]
-    z = [-1,1]
-    w = [-1,1]
-
-*/
-
-        GLint view_loc = glGetUniformLocation(pg->shader_binding->gl_program,
-                                              "invViewport");
-        if (view_loc != -1) {
-            glUniformMatrix4fv(view_loc, 1, GL_FALSE, &invViewport[0]);
         }
 
     } else if (vertex_program) {
