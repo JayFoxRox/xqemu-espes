@@ -5256,7 +5256,7 @@ static void pgraph_method(NV2AState *d,
                 NV_PGRAPH_CLEARRECTY_YMAX);
 
         unsigned int scissor_x = xmin;
-        unsigned int scissor_y = pg->surface_shape.clip_height-ymax;
+        unsigned int scissor_y = pg->surface_shape.clip_height-ymax-1;
 
         unsigned int scissor_width = xmax-xmin+1;
         unsigned int scissor_height = ymax-ymin+1;
