@@ -1123,7 +1123,6 @@ static const GLenum pgraph_depth_func_map[] = {
 };
 
 /* GL and Xbox do things the other way around = this table inverts the op! */
-/* FIXME: Might also be a bug in the Z calculation?! */
 static const GLenum pgraph_shadow_zfunc_map[] = {
     GL_ALWAYS, /* NEVER */
     GL_GEQUAL, /* LESS */
@@ -2000,7 +1999,7 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
             }
 
             if (attribute->needs_conversion) {
-                NV2A_DPRINTF("converted %d\n", i);
+                NV2A_GL_DPRINTF(false, "converted %d\n", i);
 
                 unsigned int out_stride = attribute->converted_size
                                         * attribute->converted_count;
