@@ -1858,6 +1858,61 @@ static GraphicsObject* lookup_graphics_object(PGRAPHState *s,
     return NULL;
 }
 
+static float pgraph_texture_depth_limit(unsigned int color_format) {
+    switch(color_format) {
+    case NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED:
+        return 16777215.0f;
+    case NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT:
+        /* Xbox apps only use 1E+30
+         * 1 sign, 8 exponent, 15 mantissa ? [FIXME: not sure..]
+         * => sign = 0
+         * => bias = 2^(8-1)-1 = 127
+         * => mantissa = 2^(15-1) = 32767
+         * => 0 11111110 111111111111111
+         * max = sign * 2^bias * (1 + mantissa / (mantissa+1))
+         *     =   +1 * 2^127   * (1 + 32767 / (32767 + 1))
+         */
+        return 3.4027717e38f;
+    case NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED:
+        return 65535.0f;
+    case NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT:
+        /* Xbox apps only use 511.9375
+         * https://www.opengl.org/registry/specs/NV/half_float.txt
+         * => sign = 0
+         * => bias = 2^(5-1)-1 = 15
+         * => mantissa = 2^(10-1) = 1023
+         * => 0 11110 1111111111
+         * max = sign * 2^bias * (1 + mantissa / (mantissa+1))
+         *     =   +1 * 2^15   * (1 + 1023 / (1023 + 1))
+         */
+        return 65504.0f;
+    default:
+        return 0.0f;
+    }
+}
+
+static float pgraph_surface_depth_limit(unsigned int zeta_format, bool fixed)
+{
+    switch(zeta_format) {
+    case 0:
+        return 0.0f;
+    case NV097_SET_SURFACE_FORMAT_ZETA_Z16:
+        return pgraph_texture_depth_limit(
+                  fixed ?
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FIXED
+                        :
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_Y16_FLOAT);
+    case NV097_SET_SURFACE_FORMAT_ZETA_Z24S8:
+        return pgraph_texture_depth_limit(
+                  fixed ? 
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FIXED
+                        :
+                    NV097_SET_TEXTURE_FORMAT_COLOR_LU_IMAGE_DEPTH_X8_Y24_FLOAT);
+    default:
+        assert(false);
+    }
+}
+
 static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
                                         bool f)
 {
@@ -2996,6 +3051,9 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
     float zclip_max = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMAX];
     float zclip_min = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMIN];
 
+    float depth_max = pgraph_surface_depth_limit(pg->surface_shape.zeta_format,
+                                                 !pg->surface_shape.z_format);
+
     if (fixed_function) {
         /* update fixed function composite matrix */
 
@@ -3009,10 +3067,10 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         //FIXME: Get surface dimensions?
         float m11 = 0.5 * pg->surface_shape.clip_width;
         float m22 = -0.5 * pg->surface_shape.clip_height;
-        float m33 = zclip_max - zclip_min;
+        float m33 = (zclip_max - zclip_min) * depth_max;
         //float m41 = m11;
         //float m42 = -m22;
-        float m43 = zclip_min;
+        float m43 = zclip_min * depth_max;
         //float m44 = 1.0;
 
         if (m33 == 0.0) {
@@ -3024,6 +3082,34 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
             0, 0, 1.0/m33, 0,
             -1.0, 1.0, -m43/m33, 1.0
         };
+
+/*
+
+    x = [-width*.5,+width*.5]
+    y = [+height*.5,-height*.5]
+    z = [0,depth_limit]
+    w = ???
+
+x = x/(width*.5)
+y = y/(height*.5)
+z = z/zrange
+w = -x + y + -z*zmin/zrange + w
+
+ACTUALLY:
+
+x = x/(width*.5) - w
+y = y/(height*.5) + w
+z = z/zrange -w*zmin/zrange
+w = w
+
+z = z * 2.0 - w // FIXME: JFR: WHY?!
+
+    x = [-1,1]
+    y = [-1,1]
+    z = [-1,1]
+    w = [-1,1]
+
+*/
 
         GLint view_loc = glGetUniformLocation(pg->shader_binding->gl_program,
                                               "invViewport");
@@ -3046,20 +3132,24 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
             constant->dirty = false;
         }
 
-        GLint loc = glGetUniformLocation(pg->shader_binding->gl_program,
-                                          "surfaceSize");
-        if (loc != -1) {
-            glUniform2f(loc, pg->surface_shape.clip_width,
-                        pg->surface_shape.clip_height);
-        }
-
-        loc = glGetUniformLocation(pg->shader_binding->gl_program,
-                                   "clipRange");
-        if (loc != -1) {
-            glUniform2f(loc, zclip_min, zclip_max);
-        }
-
     }
+
+    GLint loc = glGetUniformLocation(pg->shader_binding->gl_program,
+                                      "surfaceSize");
+
+    if (loc != -1) {
+        glUniform3f(loc, pg->surface_shape.clip_width,
+                         pg->surface_shape.clip_height,
+                         depth_max);
+    }
+    loc = glGetUniformLocation(pg->shader_binding->gl_program,
+                               "clipRange");
+    if (loc != -1) {
+        glUniform2f(loc, zclip_min, zclip_max);
+    }
+    glEnable(GL_CLIP_DISTANCE0);
+    glEnable(GL_CLIP_DISTANCE1);
+
     NV2A_GL_DGROUP_END();
 }
 

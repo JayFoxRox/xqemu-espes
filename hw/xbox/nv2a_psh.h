@@ -35,14 +35,6 @@ enum PshAlphaFunc {
     ALPHA_FUNC_ALWAYS,
 };
 
-enum PshDepthMode {
-  DEPTH_MODE_NONE,
-  DEPTH_MODE_D16,
-  DEPTH_MODE_D24,
-  DEPTH_MODE_F16,
-  DEPTH_MODE_F24
-};
-
 QString *psh_translate(uint32_t combiner_control, uint32_t shader_stage_program,
                        uint32_t other_stage_input,
                        const uint32_t rgb_inputs[8],

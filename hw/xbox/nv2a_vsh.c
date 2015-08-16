@@ -570,7 +570,7 @@ static const char* vsh_header =
    "uniform vec4 c[192];\n"
    "\n"
    "uniform vec2 clipRange;\n"
-   "uniform vec2 surfaceSize;\n"
+   "uniform vec3 surfaceSize;\n"
 
     /* See:
      * http://msdn.microsoft.com/en-us/library/windows/desktop/bb174703%28v=vs.85%29.aspx
@@ -786,26 +786,8 @@ QString* vsh_translate(uint16_t version,
     qstring_append(body, "vtx.T3 = oT3 * vtx.inv_w;\n");
 
     qstring_append(body,
-        /* the shaders leave the result in screen space, while
-         * opengl expects it in clip space.
-         * TODO: the pixel-center co-ordinate differences should handled
-         */
-        "oPos.x = 2.0 * (oPos.x - surfaceSize.x * 0.5) / surfaceSize.x;\n"
-        "oPos.y = -2.0 * (oPos.y - surfaceSize.y * 0.5) / surfaceSize.y;\n"
-        "if (clipRange.y != clipRange.x) {\n"
-        "  oPos.z = (oPos.z - 0.5 * (clipRange.x + clipRange.y)) / (0.5 * (clipRange.y - clipRange.x));\n"
-        "}\n"
 
-        /* Correct for the perspective divide */
-        "if (oPos.w <= 0.0) {\n"
-            /* undo the perspective divide in the case where the point would be
-             * clipped so opengl can clip it correctly */
-        "  oPos.xyz *= oPos.w;\n"
-        "} else {\n"
-            /* we don't want the OpenGL perspective divide to happen, but we
-             * can't multiply by W because it could be meaningless here */
-        "  oPos.w = 1.0;\n"
-        "}\n"
+        VERTEX_TRANSFORM
 
         /* Set outputs */
         "  gl_Position = oPos;\n"

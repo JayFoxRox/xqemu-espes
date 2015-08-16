@@ -27,6 +27,9 @@ static void generate_geometry_shader_pass_vertex(QString* s, const char* v)
 {
     qstring_append_fmt(s, "        gl_Position = gl_in[%s].gl_Position;\n", v);
     qstring_append_fmt(s, "        gl_PointSize = gl_in[%s].gl_PointSize;\n", v);
+    qstring_append_fmt(s, "        gl_ClipDistance[0] = gl_in[%s].gl_ClipDistance[0];\n", v);
+    qstring_append_fmt(s, "        gl_ClipDistance[1] = gl_in[%s].gl_ClipDistance[1];\n", v);
+    qstring_append_fmt(s, "        gl_PointSize = gl_in[%s].gl_PointSize;\n", v);
     qstring_append_fmt(s, "        g_vtx = v_vtx[%s];\n", v);
     qstring_append(s,     "        EmitVertex();\n");
 }
@@ -109,10 +112,14 @@ static QString* generate_fixed_function(const ShaderState state,
     qstring_append(s, "\n"
                       STRUCT_VERTEX_DATA);
     qstring_append_fmt(s, "noperspective out VertexData %c_vtx;\n", out_prefix);
-    qstring_append_fmt(s, "#define vtx %c_vtx", out_prefix);
+    qstring_append_fmt(s, "#define vtx %c_vtx\n", out_prefix);
 
 
     qstring_append(s,
+"uniform mat4 invViewport;\n"
+"\n"
+"uniform vec3 surfaceSize;\n"
+"uniform vec2 clipRange;\n"
 "\n"
 /* FIXME: Add these uniforms using code when they are used */
 "uniform mat4 texMat0;\n"
@@ -129,7 +136,6 @@ static QString* generate_fixed_function(const ShaderState state,
 "uniform mat4 invModelViewMat3;\n"
 "uniform mat4 projectionMat; /* FIXME: when is this used? */\n"
 "uniform mat4 compositeMat;\n"
-"uniform mat4 invViewport;\n"
 "\n"
 "void main() {\n");
 
@@ -261,23 +267,86 @@ static QString* generate_fixed_function(const ShaderState state,
     }
 
     qstring_append(s,
-    "   gl_Position = invViewport * (tPosition * compositeMat);\n"
+    "  vec4 oPos = tPosition * compositeMat;\n"
+    "vec4 OLD = oPos;"
+    //" oPos = invViewport * oPos;\n"
+
+#if 0
+// FFP
+
+    "oPos.xyz = OLD.xyz / (surfaceSize * 0.5) - OLD.w;\n"
+    "oPos.y *= -1.0;\n"
+#endif
+
+    "oPos.xyz = oPos.xyz / oPos.w;\n"
+
+    VERTEX_TRANSFORM
+
+#if 0
+
+
+
+// VP:
+    /* x,y,z: [0,size] -> [-1,+1] */
+//    "oPos.xyz = 2.0 * oPos.xyz / surfaceSize - 1.0;\n" /* REMOVEME: OLD CODE */
+    "oPos.xyz = oPos.xyz / (surfaceSize * 0.5) - 1.0;\n"
+    "oPos.y *= -1.0;\n"
+
+
+#endif
+
+    "\n"
+    "  if (oPos.w == 0.0 || isinf(oPos.w)) {\n"
+    "    vtx.inv_w = 1.0;\n"
+    "  } else {\n"
+    "    vtx.inv_w = 1.0 / oPos.w;\n"
+    "  }\n"
+    "  vtx.D0 = diffuse * vtx.inv_w;\n"
+    "  vtx.D1 = specular * vtx.inv_w;\n"
+    "  vtx.B0 = backDiffuse * vtx.inv_w;\n"
+    "  vtx.B1 = backSpecular * vtx.inv_w;\n"
+    "  vtx.Fog = vec4(0.0,0.0,0.0,1.0) * vtx.inv_w;\n"
+    "  vtx.T0 = tTexture0 *  vtx.inv_w;\n"
+    "  vtx.T1 = tTexture1 * vtx.inv_w;\n"
+    "  vtx.T2 = tTexture2 * vtx.inv_w;\n"
+    "  vtx.T3 = tTexture3 * vtx.inv_w;\n"
+    "\n"
+    //VERTEX_TRANSFORM
+    "\n"
+    "  gl_Position = oPos;\n");
+
+#if 0
+    //FIXME: Cliprange
+    "  gl_ClipDistance[0] = 1.0;\n"
+    "  gl_ClipDistance[1] = 1.0;\n"
+
+    /* the shaders leave the result in screen space, while
+     * opengl expects it in clip space.
+     * TODO: the pixel-center co-ordinate differences should handled
+     */
+    "  oPos.xyz = 2.0 * (oPos.xyz - surfaceSize * 0.5) / surfaceSize;\n"
+    "  oPos.y *= -1.0;\n"
+
+    /* Correct for the perspective divide */
+    "if (oPos.w <= 0.0) {\n"
+        /* undo the perspective divide in the case where the point would be
+         * clipped so opengl can clip it correctly */
+    "  oPos.xyz *= oPos.w;\n"
+    "} else {\n"
+        /* we don't want the OpenGL perspective divide to happen, but we
+         * can't multiply by W because it could be meaningless here */
+    "  oPos.w = 1.0;\n"
+    "}\n"
+
+#endif
+
+
 /* temp hack: the composite matrix includes the view transform... */
 //"   gl_Position = position * compositeMat;\n"
 //"   gl_Position.x = (gl_Position.x - 320.0) / 320.0;\n"
 //"   gl_Position.y = -(gl_Position.y - 240.0) / 240.0;\n"
-    "   gl_Position.z = gl_Position.z * 2.0 - gl_Position.w;\n");
+//    "  gl_Position.z = gl_Position.z * 2.0 - gl_Position.w;\n"
 
-    qstring_append(s, "vtx.inv_w = 1.0/gl_Position.w;\n");
-    qstring_append(s, "vtx.D0 = diffuse * vtx.inv_w;\n");
-    qstring_append(s, "vtx.D1 = specular * vtx.inv_w;\n");
-    qstring_append(s, "vtx.B0 = backDiffuse * vtx.inv_w;\n");
-    qstring_append(s, "vtx.B1 = backSpecular * vtx.inv_w;\n");
-    qstring_append(s, "vtx.Fog = vec4(0.0,0.0,0.0,1.0) * vtx.inv_w;\n");
-    qstring_append(s, "vtx.T0 = tTexture0 *  vtx.inv_w;\n");
-    qstring_append(s, "vtx.T1 = tTexture1 * vtx.inv_w;\n");
-    qstring_append(s, "vtx.T2 = tTexture2 * vtx.inv_w;\n");
-    qstring_append(s, "vtx.T3 = tTexture3 * vtx.inv_w;\n");
 
     qstring_append(s, "}\n");
 
