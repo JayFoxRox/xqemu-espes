@@ -47,6 +47,8 @@ enum ShaderPrimitiveMode {
 
 typedef struct ShaderState {
     /* fragment shader - register combiner stuff */
+    bool window_clip_exclusive;
+    unsigned int window_clip_count;
     uint32_t combiner_control;
     uint32_t shader_stage_program;
     uint32_t other_stage_input;

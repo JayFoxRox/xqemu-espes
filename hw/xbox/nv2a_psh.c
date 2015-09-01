@@ -199,6 +199,9 @@ struct PixelShader {
     struct FCInputInfo final_input;
     int tex_modes[4], input_tex[4];
 
+    bool window_clip_exclusive;
+    unsigned int window_clip_count;
+
     //uint32_t dot_mapping, input_texture;
 
     bool rect_tex[4];
@@ -541,26 +544,41 @@ static QString* psh_convert(struct PixelShader *ps)
     qstring_append(preflight, "\n");
     qstring_append(preflight, "uniform vec4 fogColor;\n");
 
-    /* Clipping */
-    /* FIXME: count + inclusive/exclusive should probably be stored in state */
+    /* Window Clipping */
     QString *clip = qstring_new();
-    qstring_append(preflight, "uniform ivec4 clipRegion[8];\n");
-    qstring_append(preflight, "uniform bool clipRegionExclusive;\n");
-    qstring_append(clip, "/*  Window-clip */\n"
-                         "bool clipContained = false;\n"
-                         "for (int i = 0; i < 8; i++) {\n"
-                         "  bvec4 clipTest = bvec4(lessThan(gl_FragCoord.xy, clipRegion[i].xy),\n"
-                         "                         greaterThan(gl_FragCoord.xy, clipRegion[i].zw));\n"
-                         "  clipContained = clipContained || !any(clipTest);\n"
-                         /* Early out for exclusive window clip */
-                         "  if (clipRegionExclusive && clipContained) {\n"
-                         "    discard;\n"
-                         "  }\n"
-                         "}\n"
-                         /* Check for inclusive window clip */
-                         "if (!clipRegionExclusive && !clipContained) {\n"
-                         "  discard;\n"
-                         "}\n");
+    if (ps->window_clip_count != 0) {
+        qstring_append_fmt(preflight, "uniform ivec4 clipRegion[%d];\n",
+                           ps->window_clip_count);
+        qstring_append_fmt(clip, "/*  Window-clip (%s) */\n",
+                           ps->window_clip_exclusive ?
+                               "Exclusive" : "Inclusive");
+        if (!ps->window_clip_exclusive) {
+            qstring_append(clip, "bool clipContained = false;\n");
+        }
+        qstring_append_fmt(clip, "for (int i = 0; i < %d; i++) {\n",
+                           ps->window_clip_count);
+        qstring_append(clip, "  bvec4 clipTest = bvec4(lessThan(gl_FragCoord.xy, clipRegion[i].xy),\n"
+                             "                         greaterThan(gl_FragCoord.xy, clipRegion[i].zw));\n"
+                             "  if (!any(clipTest)) {\n");
+        if (ps->window_clip_exclusive) {
+            /* Pixel in clip region = exclude by discarding */
+            qstring_append(clip, "    discard;\n");
+            assert(false); /* Untested */
+        } else {
+            /* Pixel in clip region = mark pixel as contained and leave */
+            qstring_append(clip, "    clipContained = true;\n"
+                                 "    break;\n");
+        }
+        qstring_append(clip, "  }\n"
+                             "}\n");
+        /* Check for inclusive window clip */
+        if (!ps->window_clip_exclusive) {
+            qstring_append(clip, "if (!clipContained) { discard; }\n");
+        }
+    } else if (ps->window_clip_exclusive) {
+        /* Clip everything */
+        qstring_append(clip, "discard;\n");
+    }
 
     /* calculate perspective-correct inputs */
     QString *vars = qstring_new();
@@ -771,7 +789,9 @@ static void parse_combiner_output(uint32_t value, struct OutputInfo *out)
     out->cd_alphablue = flags & 0x40;
 }
 
-QString *psh_translate(uint32_t combiner_control, uint32_t shader_stage_program,
+QString *psh_translate(bool window_clip_exclusive,
+                       unsigned int window_clip_count,
+                       uint32_t combiner_control, uint32_t shader_stage_program,
                        uint32_t other_stage_input,
                        const uint32_t rgb_inputs[8],
                        const uint32_t rgb_outputs[8],
@@ -795,6 +815,9 @@ QString *psh_translate(uint32_t combiner_control, uint32_t shader_stage_program,
         ps.tex_modes[i] = (shader_stage_program >> (i * 5)) & 0x1F;
         ps.rect_tex[i] = rect_tex[i];
     }
+
+    ps.window_clip_exclusive = window_clip_exclusive;
+    ps.window_clip_count = window_clip_count;
 
     ps.alpha_test = alpha_test;
     ps.alpha_func = alpha_func;

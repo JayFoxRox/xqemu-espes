@@ -635,7 +635,9 @@ ShaderBinding* generate_shaders(const ShaderState state)
 
     /* generate a fragment shader from register combiners */
 
-    QString *fragment_shader_code = psh_translate(state.combiner_control,
+    QString *fragment_shader_code = psh_translate(state.window_clip_exclusive,
+                   state.window_clip_count,
+                   state.combiner_control,
                    state.shader_stage_program,
                    state.other_stage_input,
                    state.rgb_inputs, state.rgb_outputs,
