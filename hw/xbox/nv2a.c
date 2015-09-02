@@ -4427,7 +4427,6 @@ static void pgraph_method(NV2AState *d,
     case NV097_SET_VERTEX_DATA2S ...
             NV097_SET_VERTEX_DATA2S + 0x3c: {
         slot = (method - NV097_SET_VERTEX_DATA2S) / 4;
-        assert(false); /* FIXME: Untested! */
         VertexAttribute *attribute = &pg->vertex_attributes[slot];
         pgraph_allocate_inline_buffer_vertices(pg, slot);
         /* FIXME: Is mapping to [-1,+1] correct? */
@@ -4440,7 +4439,6 @@ static void pgraph_method(NV2AState *d,
         attribute->inline_value[3] = 1.0;
         if (slot == 0) {
             pgraph_finish_inline_buffer_vertex(pg);
-            assert(false); /* FIXME: Untested */
         }
         break;
     }
