@@ -538,11 +538,19 @@ GLSL_DEFINE(sceneAmbientColor, GLSL_LTCTXA(NV_IGRAPH_XF_LTCTXA_FR_AMB) ".xyz")
     /* Fog */
     if (state.fog_enable) {
 
+        /* FIXME: Do this before or after calculations in FFP / VP? */
+
         /* From: https://www.opengl.org/registry/specs/NV/fog_distance.txt */
         switch(state.foggen) {
         case FOGGEN_SPEC_ALPHA:
-            /* FIXME: Do we have to clamp here? */
-            qstring_append(body, "  float fogDistance = clamp(specular.a, 0.0, 1.0);\n");
+            if (state.fixed_function) {
+                /* FIXME: Do we have to clamp here? */
+                qstring_append(body, "  float fogDistance = clamp(specular.a, 0.0, 1.0);\n");
+            } else if (state.vertex_program) {
+                qstring_append(body, "  float fogDistance = oD1.a;\n");
+            } else {
+                assert(false);
+            }
             break;
         case FOGGEN_RADIAL:
             qstring_append(body, "  float fogDistance = length(tPosition.xyz);\n");
