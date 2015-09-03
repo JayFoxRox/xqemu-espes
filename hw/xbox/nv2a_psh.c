@@ -522,20 +522,171 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     ps->varE = ps->varF = NULL;
 }
 
-
+static const char* get_dotmap(struct PixelShader *ps, unsigned int stage) {
+    return "dotMapZeroToOne";
+/*
+    switch (ps->dotmapping[stage]) {
+    case PS_DOTMAPPING_ZERO_TO_ONE: return "dotMapZeroToOne";
+    case PS_DOTMAPPING_MINUS1_TO_1_D3D: return "dotMapMinusOneToOneD3D";
+    case PS_DOTMAPPING_MINUS1_TO_1_GL: return "dotMapMinusOneToOneGL";
+    case PS_DOTMAPPING_MINUS1_TO_1: return "dotMapMinusOneToOne";
+    case PS_DOTMAPPING_HILO_1: return "dotMapHiLoOne";
+    case PS_DOTMAPPING_HILO_HEMISPHERE_D3D: return "dotMapHiLoHemisphereD3D";
+    case PS_DOTMAPPING_HILO_HEMISPHERE_GL: return "dotMapHiLoHemisphereGL";
+    case PS_DOTMAPPING_HILO_HEMISPHERE: return "dotMapHiLoHemisphere";
+    default:
+        assert(false);
+        break
+    }
+*/
+}
 
 static QString* psh_convert(struct PixelShader *ps)
 {
     int i;
 
     QString *preflight = qstring_new();
-    qstring_append(preflight, STRUCT_VERTEX_DATA);
-    qstring_append(preflight, "noperspective in VertexData g_vtx;\n");
-    qstring_append(preflight, "#define vtx g_vtx\n");
-    qstring_append(preflight, "\n");
-    qstring_append(preflight, "out vec4 fragColor;\n");
-    qstring_append(preflight, "\n");
-    qstring_append(preflight, "uniform vec4 fogColor;\n");
+    qstring_append(preflight,
+STRUCT_VERTEX_DATA
+"noperspective in VertexData g_vtx;\n"
+"#define vtx g_vtx\n"
+"\n"
+"out vec4 fragColor;\n"
+"\n"
+"uniform vec4 fogColor;\n"
+"\n"
+
+/* dotmap functions */
+
+"uvec4 texUint8(vec4 tex) {\n"
+"  return uvec4(tex * 255.0);\n"
+"}\n"
+"\n"
+"uint texUint32(vec4 tex) {\n"
+"  uvec4 utex = texUint8(tex);\n"
+"  return utex.a << 24u | utex.r << 16u | utex.g << 8u | utex.b;\n"
+"}\n"
+"\n"
+"uvec2 texUint16(vec4 tex) {\n"
+"  uint utex = texUint32(tex);\n"
+"  return uvec2((utex >> 16u) & 0xFFFFu, utex & 0xFFFFu);\n"
+"}\n"
+"\n"
+"vec3 dotMapZeroToOne(vec4 tex) {\n"
+"  /* 0x00 = 0.0\n"
+"   * 0xFF = 1.0\n"
+"   */\n"
+"  return tex.rgb;\n"
+"}\n"
+"\n"
+"float mapMinusOneToOneD3D(uint x) {\n"
+"  /* 0x00 = -128/127\n"
+"   * 0x01 = -1.0\n"
+"   * 0x80 = 0.0\n"
+"   * 0xFF = 1.0\n"
+"   */\n"
+"  return float(x - 128u) / 127.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapMinusOneToOneD3D(vec4 tex) {\n"
+"  uvec4 argb = texUint8(tex);\n"
+"  return vec3(mapMinusOneToOneD3D(argb.r),\n"
+"              mapMinusOneToOneD3D(argb.g),\n"
+"              mapMinusOneToOneD3D(argb.b));\n"
+"}\n"
+"\n"
+"float mapMinusOneToOneGL(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x80 = -1.0\n"
+"   * 0x7F = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 7u) - 1u) << 8u) | x);\n"
+"  return float(sx + 128) / 127.5 - 1.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapMinusOneToOneGL(vec4 tex) {\n"
+"  uvec4 argb = texUint8(tex);\n"
+"  return vec3(mapMinusOneToOneGL(argb.r),\n"
+"              mapMinusOneToOneGL(argb.g),\n"
+"              mapMinusOneToOneGL(argb.b));\n"
+"}\n"
+"\n"
+"float mapMinusOneToOne(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x80 = -128/127\n"
+"   * 0x7F = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 7u) - 1u) << 8u) | x);\n"
+"  return float(sx) / 127.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapMinusOneToOne(vec4 tex) {\n"
+"  uvec4 argb = texUint8(tex);\n"
+"  return vec3(mapMinusOneToOne(argb.r),\n"
+"              mapMinusOneToOne(argb.g),\n"
+"              mapMinusOneToOne(argb.b));\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoOne(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  /* 0x0000 = 0.0\n"
+"   * 0xFFFF = 1.0\n"
+"   */\n"
+"  return vec3(vec2(hl.xy) / 65535.0, 1.0);\n"
+"}\n"
+"\n"
+"float mapHiLoHemisphereD3D(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x8000 = -1.0\n"
+"   * 0x0000 = 0.0\n"
+"   * 0x7FFF = 32767/32768\n"
+"   */\n"
+"  int sx = int((~((x >> 15u) - 1u) << 16u) | x);\n"
+"  return float(sx) / 32768.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoHemisphereD3D(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  return vec3(mapHiLoHemisphereD3D(hl.x),\n"
+"              mapHiLoHemisphereD3D(hl.y),\n"
+"              sqrt(1.0 - hl.x * hl.x - hl.y * hl.y));\n"
+"}\n"
+"\n"
+"\n"
+"float mapHiLoHemisphereGL(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x8000 = -1.0\n"
+"   * 0x7FFF = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 15u) - 1u) << 16u) | x);\n"
+"  return float(sx + 32768) / 32767.5 - 1.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoHemisphereGL(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  return vec3(mapHiLoHemisphereGL(hl.x),\n"
+"              mapHiLoHemisphereGL(hl.y),\n"
+"              sqrt(1.0 - hl.x * hl.x - hl.y * hl.y));\n"
+"}\n"
+"\n"
+"float mapHiLoHemisphere(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x8000 = -32768/32767\n"
+"   * 0x8001 = -1.0\n"
+"   * 0x0000 = 0.0\n"
+"   * 0x7FFF = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 15u) - 1u) << 16u) | x);\n"
+"  return float(sx) / 32767.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoHemisphere(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  return vec3(mapHiLoHemisphere(hl.x),\n"
+"              mapHiLoHemisphere(hl.y),\n"
+"              sqrt(1.0 - hl.x * hl.x - hl.y * hl.y));\n"
+"}\n"
+"\n");
 
     /* calculate perspective-correct inputs */
     QString *vars = qstring_new();
@@ -635,8 +786,8 @@ static QString* psh_convert(struct PixelShader *ps)
         case PS_TEXTUREMODES_DOT_ST:
             /* texm3x2tex */
             assert(i >= 2);
-            qstring_append_fmt(vars, "float tmpV%d = dot(pT%d.xyz, t%d.rgb);",
-                               i, i, ps->input_tex[i]);
+            qstring_append_fmt(vars, "float tmpV%d = dot(pT%d.xyz, %s(t%d));",
+                               i, i, get_dotmap(ps, i), ps->input_tex[i]);
 
             assert(!ps->state.rect_tex[i]);
             sampler_type = "sampler2D";
@@ -647,8 +798,8 @@ static QString* psh_convert(struct PixelShader *ps)
         case PS_TEXTUREMODES_DOT_ZW:
             /* texm3x2depth */
             assert(i >= 2);
-            qstring_append_fmt(vars, "float tmpW%d = dot(pT%d.xyz, t%d.rgb);",
-                               i, i, ps->input_tex[i]);
+            qstring_append_fmt(vars, "float tmpW%d = dot(pT%d.xyz, %s(t%d));",
+                               i, i, get_dotmap(ps, i), ps->input_tex[i]);
 
             /* FIXME: we need to write the depth value here, however, we must
              *        know about the xbox framebuffer depth range etc to scale
@@ -668,8 +819,8 @@ static QString* psh_convert(struct PixelShader *ps)
             //assert(false);
             break;
         case PS_TEXTUREMODES_DOTPRODUCT:
-            qstring_append_fmt(vars, "vec4 t%d = vec4(dot(pT%d.xyz, t%d.rgb));\n",
-                               i, i, ps->input_tex[i]);
+            qstring_append_fmt(vars, "vec4 t%d = vec4(dot(pT%d.xyz, %s(t%d)));\n",
+                               i, i, get_dotmap(ps, i), ps->input_tex[i]);
             break;
         case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
         case PS_TEXTUREMODES_DOT_RFLCT_DIFF: {
