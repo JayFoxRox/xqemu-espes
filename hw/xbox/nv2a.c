@@ -242,6 +242,7 @@
 #   define NV_PGRAPH_TRAPPED_ADDR_CHID                        0x01F00000
 #   define NV_PGRAPH_TRAPPED_ADDR_DHV                         0x10000000
 #define NV_PGRAPH_TRAPPED_DATA_LOW                       0x00000708
+#define NV_PGRAPH_TRAPPED_DATA_HIGH                      0x0000070C
 #define NV_PGRAPH_SURFACE                                0x00000710
 #   define NV_PGRAPH_SURFACE_WRITE_3D                         0x00700000
 #   define NV_PGRAPH_SURFACE_READ_3D                          0x07000000
@@ -1535,12 +1536,6 @@ typedef struct PGRAPHState {
     hwaddr context_address;
 
 
-    unsigned int trapped_method;
-    unsigned int trapped_subchannel;
-    unsigned int trapped_channel_id;
-    uint32_t trapped_data[2];
-    uint32_t notify_source;
-
     bool fifo_access;
     QemuCond fifo_access_cond;
 
@@ -1840,7 +1835,7 @@ static uint64_t fast_hash(const uint8_t *data, size_t len, unsigned int samples)
 static void update_irq(NV2AState *d)
 {
     /* PFIFO */
-    if (d->pfifo.pending_interrupts & d->pfifo.enabled_interrupts) {
+    if (d->pfifo.regs[NV_PGRAPH_INTR] & d->pfifo.enabled_interrupts) {
         d->pmc.pending_interrupts |= NV_PMC_INTR_0_PFIFO;
     } else {
         d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PFIFO;
@@ -1854,7 +1849,7 @@ static void update_irq(NV2AState *d)
     }
 
     /* PGRAPH */
-    if (d->pgraph.pending_interrupts & d->pgraph.enabled_interrupts) {
+    if (d->pgraph.regs[NV_PGRAPH_INTR] & d->pgraph.enabled_interrupts) {
         d->pmc.pending_interrupts |= NV_PMC_INTR_0_PGRAPH;
     } else {
         d->pmc.pending_interrupts &= ~NV_PMC_INTR_0_PGRAPH;
@@ -4091,15 +4086,17 @@ static void pgraph_method(NV2AState *d,
          * but nothing obvious sticks out. Weird.
          */
         if (parameter != 0) {
-            assert(!(pg->pending_interrupts & NV_PGRAPH_INTR_NOTIFY));
+            assert(!(pg->regs[NV_PGRAPH_INTR] & NV_PGRAPH_INTR_NOTIFY));
 
-
-            pg->trapped_channel_id = pg->channel_id;
-            pg->trapped_subchannel = subchannel;
-            pg->trapped_method = method;
-            pg->trapped_data[0] = parameter;
-            pg->notify_source = NV_PGRAPH_NSOURCE_NOTIFICATION; /* TODO: check this */
-            pg->pending_interrupts |= NV_PGRAPH_INTR_NOTIFY;
+            uint32_t r = 0;
+            SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_CHID, pg->channel_id);
+            SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_SUBCH, subchannel);
+            SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_MTHD, method);
+            pg->regs[NV_PGRAPH_TRAPPED_ADDR] = r;
+            pg->regs[NV_PGRAPH_TRAPPED_DATA_LOW] = parameter;
+            pg->regs[NV_PGRAPH_TRAPPED_DATA_HIGH] = 0x00000000; /* FIXME? */
+            pg->regs[NV_PGRAPH_NSOURCE] |= NV_PGRAPH_NSOURCE_NOTIFICATION; /* TODO: check this */
+            pg->regs[NV_PGRAPH_INTR] |= NV_PGRAPH_INTR_NOTIFY;
 
             qemu_mutex_unlock(&pg->lock);
             qemu_mutex_lock_iothread();
@@ -4107,7 +4104,7 @@ static void pgraph_method(NV2AState *d,
             qemu_mutex_lock(&pg->lock);
             qemu_mutex_unlock_iothread();
 
-            while (pg->pending_interrupts & NV_PGRAPH_INTR_NOTIFY) {
+            while (pg->regs[NV_PGRAPH_INTR] & NV_PGRAPH_INTR_NOTIFY) {
                 qemu_cond_wait(&pg->interrupt_cond, &pg->lock);
             }
         }
@@ -5945,20 +5942,22 @@ static void pgraph_context_switch(NV2AState *d, unsigned int channel_id)
     bool valid;
     valid = d->pgraph.channel_valid && d->pgraph.channel_id == channel_id;
     if (!valid) {
-        d->pgraph.trapped_channel_id = channel_id;
+        SET_MASK(d->pgraph.regs[NV_PGRAPH_TRAPPED_ADDR],
+                 NV_PGRAPH_TRAPPED_ADDR_CHID,
+                 channel_id);
     }
     if (!valid) {
         NV2A_DPRINTF("puller needs to switch to ch %d\n", channel_id);
 
         qemu_mutex_unlock(&d->pgraph.lock);
         qemu_mutex_lock_iothread();
-        d->pgraph.pending_interrupts |= NV_PGRAPH_INTR_CONTEXT_SWITCH;
+        d->pgraph.regs[NV_PGRAPH_INTR] |= NV_PGRAPH_INTR_CONTEXT_SWITCH;
         update_irq(d);
 
         qemu_mutex_lock(&d->pgraph.lock);
         qemu_mutex_unlock_iothread();
 
-        while (d->pgraph.pending_interrupts & NV_PGRAPH_INTR_CONTEXT_SWITCH) {
+        while (d->pgraph.regs[NV_PGRAPH_INTR] & NV_PGRAPH_INTR_CONTEXT_SWITCH) {
             qemu_cond_wait(&d->pgraph.interrupt_cond, &d->pgraph.lock);
         }
     }
@@ -6198,7 +6197,7 @@ static void pfifo_run_pusher(NV2AState *d) {
 
         state->dma_push_suspended = true;
 
-        d->pfifo.pending_interrupts |= NV_PFIFO_INTR_0_DMA_PUSHER;
+        d->pfifo.regs[NV_PGRAPH_INTR] |= NV_PFIFO_INTR_0_DMA_PUSHER;
         update_irq(d);
     }
 }
@@ -6310,7 +6309,7 @@ static uint64_t pfifo_read(void *opaque,
     uint64_t r = 0;
     switch (addr) {
     case NV_PFIFO_INTR_0:
-        r = d->pfifo.pending_interrupts;
+        r = d->pfifo.regs[NV_PGRAPH_INTR];
         break;
     case NV_PFIFO_INTR_EN_0:
         r = d->pfifo.enabled_interrupts;
@@ -6407,7 +6406,7 @@ static void pfifo_write(void *opaque, hwaddr addr,
 
     switch (addr) {
     case NV_PFIFO_INTR_0:
-        d->pfifo.pending_interrupts &= ~val;
+        d->pfifo.regs[NV_PGRAPH_INTR] &= ~val;
         update_irq(d);
         break;
     case NV_PFIFO_INTR_EN_0:
@@ -6777,30 +6776,16 @@ static uint64_t pgraph_read(void *opaque,
 
     uint64_t r = 0;
     switch (addr) {
-    case NV_PGRAPH_INTR:
-        r = d->pgraph.pending_interrupts;
-        break;
     case NV_PGRAPH_INTR_EN:
         r = d->pgraph.enabled_interrupts;
-        break;
-    case NV_PGRAPH_NSOURCE:
-        r = d->pgraph.notify_source;
         break;
     case NV_PGRAPH_CTX_USER:
         SET_MASK(r, NV_PGRAPH_CTX_USER_CHANNEL_3D,
                  d->pgraph.context[d->pgraph.channel_id].channel_3d);
         SET_MASK(r, NV_PGRAPH_CTX_USER_CHANNEL_3D_VALID, 1);
         SET_MASK(r, NV_PGRAPH_CTX_USER_SUBCH,
-                 d->pgraph.context[d->pgraph.channel_id].subchannel << 13);
+                 d->pgraph.context[d->pgraph.channel_id].subchannel);
         SET_MASK(r, NV_PGRAPH_CTX_USER_CHID, d->pgraph.channel_id);
-        break;
-    case NV_PGRAPH_TRAPPED_ADDR:
-        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_CHID, d->pgraph.trapped_channel_id);
-        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_SUBCH, d->pgraph.trapped_subchannel);
-        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_MTHD, d->pgraph.trapped_method);
-        break;
-    case NV_PGRAPH_TRAPPED_DATA_LOW:
-        r = d->pgraph.trapped_data[0];
         break;
     case NV_PGRAPH_FIFO:
         SET_MASK(r, NV_PGRAPH_FIFO_ACCESS, d->pgraph.fifo_access);
@@ -6823,13 +6808,24 @@ static uint64_t pgraph_read(void *opaque,
 }
 static void pgraph_set_context_user(NV2AState *d, uint32_t val)
 {
-    d->pgraph.channel_id = (val & NV_PGRAPH_CTX_USER_CHID) >> 24;
-
+    d->pgraph.channel_id = GET_MASK(val, NV_PGRAPH_CTX_USER_CHID);
     d->pgraph.context[d->pgraph.channel_id].channel_3d =
         GET_MASK(val, NV_PGRAPH_CTX_USER_CHANNEL_3D);
     d->pgraph.context[d->pgraph.channel_id].subchannel =
         GET_MASK(val, NV_PGRAPH_CTX_USER_SUBCH);
 }
+
+static uint32_t pgraph_get_context_user(NV2AState *d)
+{
+    uint32_t val = 0;
+    SET_MASK(val, NV_PGRAPH_CTX_USER_CHID, d->pgraph.channel_id);
+    SET_MASK(val, NV_PGRAPH_CTX_USER_CHANNEL_3D,
+             d->pgraph.context[d->pgraph.channel_id].channel_3d);
+    SET_MASK(val, NV_PGRAPH_CTX_USER_SUBCH,
+             d->pgraph.context[d->pgraph.channel_id].subchannel);
+    return val;
+}
+
 static void pgraph_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
@@ -6841,7 +6837,7 @@ static void pgraph_write(void *opaque, hwaddr addr,
 
     switch (addr) {
     case NV_PGRAPH_INTR:
-        d->pgraph.pending_interrupts &= ~val;
+        d->pgraph.regs[NV_PGRAPH_INTR] &= ~val;
         qemu_cond_broadcast(&d->pgraph.interrupt_cond);
         break;
     case NV_PGRAPH_INTR_EN:
@@ -6876,25 +6872,29 @@ static void pgraph_write(void *opaque, hwaddr addr,
         d->pgraph.context_address =
             (val & NV_PGRAPH_CHANNEL_CTX_POINTER_INST) << 4;
         break;
-    case NV_PGRAPH_CHANNEL_CTX_TRIGGER:
+    case NV_PGRAPH_CHANNEL_CTX_TRIGGER: {
 
+        uint8_t *context_ptr = d->ramin_ptr + d->pgraph.context_address;
+
+        if (val & NV_PGRAPH_CHANNEL_CTX_TRIGGER_WRITE_OUT) {
+            /* do stuff ... */
+            NV2A_DPRINTF("PGRAPH: write channel %d context to %" HWADDR_PRIx "\n",
+                         d->pgraph.channel_id, d->pgraph.context_address);
+            uint32_t context_user = pgraph_get_context_user(d);
+            stl_le_p((uint32_t*)context_ptr, context_user);
+        }
         if (val & NV_PGRAPH_CHANNEL_CTX_TRIGGER_READ_IN) {
             NV2A_DPRINTF("PGRAPH: read channel %d context from %" HWADDR_PRIx "\n",
                          d->pgraph.channel_id, d->pgraph.context_address);
 
-            uint8_t *context_ptr = d->ramin_ptr + d->pgraph.context_address;
             uint32_t context_user = ldl_le_p((uint32_t*)context_ptr);
-
             NV2A_DPRINTF("    - CTX_USER = 0x%x\n", context_user);
-
 
             pgraph_set_context_user(d, context_user);
         }
-        if (val & NV_PGRAPH_CHANNEL_CTX_TRIGGER_WRITE_OUT) {
-            /* do stuff ... */
-        }
 
         break;
+    }
     default:
         d->pgraph.regs[addr] = val;
         break;

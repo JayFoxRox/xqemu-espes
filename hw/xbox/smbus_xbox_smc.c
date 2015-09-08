@@ -137,7 +137,7 @@ static uint8_t smc_read_data(SMBusDevice *dev, uint8_t cmd, int n)
             smc->version_string_index++%(sizeof(smc_version_string)-1)];
     case SMC_REG_AVPACK:
         /* pretend to have a composite av pack plugged in */
-        return SMC_REG_AVPACK_COMPOSITE;
+        return SMC_REG_AVPACK_SCART;
 
     case SMC_REG_SCRATCH:
         return smc->scratch_reg;
