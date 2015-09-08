@@ -19,6 +19,8 @@
  * <http://www.gnu.org/licenses/>.
  */
 
+#define XBOX
+
 #include "qapi/error.h"
 #include "qemu/typedefs.h"
 #include "qemu/notify.h"
@@ -34,7 +36,11 @@
 #define ACPI_PM_TIMER_WIDTH             32
 
 /* PM Timer ticks per second (HZ) */
-#define PM_TIMER_FREQUENCY  3579545
+#ifdef XBOX
+  #define PM_TIMER_FREQUENCY  3750000
+#else
+  #define PM_TIMER_FREQUENCY  3579545
+#endif
 
 
 /* ACPI fixed hardware registers */
