@@ -1726,6 +1726,7 @@ typedef struct NV2AState {
         uint32_t enabled_interrupts;
 
         QemuThread puller_thread;
+        QemuThread pusher_thread;
         Cache1State cache1;
 
         uint32_t regs[0x2000];
@@ -5969,6 +5970,8 @@ static void pgraph_wait_fifo_access(NV2AState *d) {
     }
 }
 
+unsigned int cache_size = 0;
+
 static void* pfifo_puller_thread(void *arg)
 {
     NV2AState *d = arg;
@@ -5988,6 +5991,8 @@ static void* pfifo_puller_thread(void *arg)
             }
         }
         QSIMPLEQ_CONCAT(&state->working_cache, &state->cache);
+cache_size = 0;
+assert(QSIMPLEQ_EMPTY(&state->cache));
         qemu_mutex_unlock(&state->cache_lock);
 
         qemu_mutex_lock(&d->pgraph.lock);
@@ -6082,7 +6087,8 @@ static void pfifo_run_pusher(NV2AState *d) {
     control = &d->user.channel_control[channel_id];
 
     if (!state->push_enabled) return;
-
+    if (!state->dma_push_enabled) return;
+    if (state->dma_push_suspended) return;
 
     /* only handling DMA for now... */
 
@@ -6090,9 +6096,6 @@ static void pfifo_run_pusher(NV2AState *d) {
     uint32_t channel_modes = d->pfifo.regs[NV_PFIFO_MODE];
     assert(channel_modes & (1 << channel_id));
     assert(state->mode == FIFO_DMA);
-
-    if (!state->dma_push_enabled) return;
-    if (state->dma_push_suspended) return;
 
     /* We're running so there should be no pending errors... */
     assert(state->error == NV_PFIFO_CACHE1_DMA_STATE_ERROR_NONE);
@@ -6122,8 +6125,18 @@ static void pfifo_run_pusher(NV2AState *d) {
             command->subchannel = state->subchannel;
             command->nonincreasing = state->method_nonincreasing;
             command->parameter = word;
+
             qemu_mutex_lock(&state->cache_lock);
+if (cache_size < 128) {
             QSIMPLEQ_INSERT_TAIL(&state->cache, command, entry);
+            cache_size++;
+} else {
+g_free(command);
+control->dma_get -= 4;
+            qemu_cond_signal(&state->cache_cond);
+            qemu_mutex_unlock(&state->cache_lock);
+return;
+}
             qemu_cond_signal(&state->cache_cond);
             qemu_mutex_unlock(&state->cache_lock);
 
@@ -6202,7 +6215,13 @@ static void pfifo_run_pusher(NV2AState *d) {
     }
 }
 
-
+static void* pfifo_pusher_thread(void *arg)
+{
+    NV2AState *d = arg;
+    while(1) {
+      pfifo_run_pusher(d);
+    }
+}
 
 
 
@@ -6428,7 +6447,6 @@ static void pfifo_write(void *opaque, hwaddr addr,
         if (d->pfifo.cache1.dma_push_suspended
              && !GET_MASK(val, NV_PFIFO_CACHE1_DMA_PUSH_STATUS)) {
             d->pfifo.cache1.dma_push_suspended = false;
-            pfifo_run_pusher(d);
         }
         d->pfifo.cache1.dma_push_suspended =
             GET_MASK(val, NV_PFIFO_CACHE1_DMA_PUSH_STATUS);
@@ -7146,10 +7164,6 @@ static void user_write(void *opaque, hwaddr addr,
         switch (addr & 0xFFFF) {
         case NV_USER_DMA_PUT:
             control->dma_put = val;
-
-            if (d->pfifo.cache1.push_enabled) {
-                pfifo_run_pusher(d);
-            }
             break;
         case NV_USER_DMA_GET:
             control->dma_get = val;
@@ -7595,6 +7609,9 @@ static void nv2a_init_memory(NV2AState *d, MemoryRegion *ram)
     qemu_thread_create(&d->pfifo.puller_thread,
                        pfifo_puller_thread,
                        d, QEMU_THREAD_JOINABLE);
+    qemu_thread_create(&d->pfifo.pusher_thread,
+                       pfifo_pusher_thread,
+                       d, QEMU_THREAD_JOINABLE);
 }
 
 static int nv2a_initfn(PCIDevice *dev)
@@ -7661,6 +7678,7 @@ static void nv2a_exitfn(PCIDevice *dev)
     d->exiting = true;
     qemu_cond_signal(&d->pfifo.cache1.cache_cond);
     qemu_thread_join(&d->pfifo.puller_thread);
+    qemu_thread_join(&d->pfifo.pusher_thread);
 
     qemu_mutex_destroy(&d->pfifo.cache1.cache_lock);
     qemu_cond_destroy(&d->pfifo.cache1.cache_cond);
