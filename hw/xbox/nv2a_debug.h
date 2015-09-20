@@ -28,7 +28,7 @@
 # define NV2A_DPRINTF(format, ...)       do { } while (0)
 #endif
 
-// #define DEBUG_NV2A_GL
+#define DEBUG_NV2A_GL
 #ifdef DEBUG_NV2A_GL
 
 #include <stdbool.h>

@@ -239,19 +239,19 @@ static bool ilu_force_scalar[] = {
 };
 
 static const char* out_reg_name[] = {
-    "oPos",
+    "rPos",
     "???",
     "???",
-    "oD0",
-    "oD1",
-    "oFog",
-    "oPts",
-    "oB0",
-    "oB1",
-    "oT0",
-    "oT1",
-    "oT2",
-    "oT3",
+    "rD0",
+    "rD1",
+    "rFog",
+    "rPts",
+    "rB0",
+    "rB1",
+    "rT0",
+    "rT1",
+    "rT2",
+    "rT3",
     "???",
     "???",
     "A0.x",
@@ -337,10 +337,9 @@ static QString* decode_opcode_input(const uint32_t *shader_token,
 
     QString *ret_str = qstring_new();
 
-
-    if (vsh_get_field(shader_token, neg_field) > 0) {
-        qstring_append_chr(ret_str, '-');
-    }
+    bool negate = vsh_get_field(shader_token, neg_field) > 0;
+    qstring_append_chr(ret_str, negate ? '-' : '+' );
+    qstring_append_chr(ret_str, ',');
 
     /* PARAM_R uses the supplied reg_num, but the other two need to be
      * determined */
@@ -519,180 +518,55 @@ static const char* vsh_header =
     "\n"
     "int A0 = 0;\n"
     "\n"
-    "vec4 R0 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R1 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R2 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R3 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R4 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R5 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R6 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R7 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R8 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R9 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R10 = vec4(0.0,0.0,0.0,0.0);\n"
-    "vec4 R11 = vec4(0.0,0.0,0.0,0.0);\n"
-    "#define R12 oPos\n" /* R12 is a mirror of oPos */
+    "IFloat4 rPos = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rD0 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rD1 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    /* FIXME: NV_vertex_program says: "FOGC is the transformed vertex's fog
+     * coordinate. The register's first floating-point component is interpolated
+     * across the assembled primitive during rasterization and used as the fog
+     * distance to compute per-fragment the fog factor when fog is enabled.
+     * However, if both fog and vertex program mode are enabled, but the FOGC
+     * vertex result register is not written, the fog factor is overridden to
+     * 1.0. The register's other three components are ignored."
+     *
+     * That probably means it will read back as vec4(0.0, 0.0, 0.0, 1.0) but
+     * will be set to 1.0 AFTER the VP if it was never written?
+     * We should test on real hardware..
+     *
+     * We'll force 1.0 for oFog.x for now.
+     */
+    "IFloat4 rFog = IFloat4(IFloatOne, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rPts = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rB0 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rB1 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rT0 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rT1 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rT2 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "IFloat4 rT3 = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n"
+    "\n"
+    "IFloat4 R0 = IFloat4(IFloatZero);\n"
+    "IFloat4 R1 = IFloat4(IFloatZero);\n"
+    "IFloat4 R2 = IFloat4(IFloatZero);\n"
+    "IFloat4 R3 = IFloat4(IFloatZero);\n"
+    "IFloat4 R4 = IFloat4(IFloatZero);\n"
+    "IFloat4 R5 = IFloat4(IFloatZero);\n"
+    "IFloat4 R6 = IFloat4(IFloatZero);\n"
+    "IFloat4 R7 = IFloat4(IFloatZero);\n"
+    "IFloat4 R8 = IFloat4(IFloatZero);\n"
+    "IFloat4 R9 = IFloat4(IFloatZero);\n"
+    "IFloat4 R10 = IFloat4(IFloatZero);\n"
+    "IFloat4 R11 = IFloat4(IFloatZero);\n"
+    "#define R12 rPos\n" /* R12 is a mirror of oPos */
     "\n"
 
-    /* See:
-     * http://msdn.microsoft.com/en-us/library/windows/desktop/bb174703%28v=vs.85%29.aspx
-     * https://www.opengl.org/registry/specs/NV/vertex_program1_1.txt
-     */
-    "\n"
-//QQQ #ifdef NICE_CODE
-    "/* Converts the input to vec4, pads with last component */\n"
-    "vec4 _in(float v) { return vec4(v); }\n"
-    "vec4 _in(vec2 v) { return v.xyyy; }\n"
-    "vec4 _in(vec3 v) { return v.xyzz; }\n"
-    "vec4 _in(vec4 v) { return v.xyzw; }\n"
-//#else
-//    "/* Make sure input is always a vec4 */\n"
-//   "#define _in(v) vec4(v)\n"
-//#endif
-    "\n"
-    "#define INFINITY (1.0 / 0.0)\n"
-    "\n"
-    "#define MOV(dest, mask, src) dest.mask = _MOV(_in(src)).mask\n"
-    "vec4 _MOV(vec4 src)\n"
-    "{\n"
-    "  return src;\n"
-    "}\n"
-    "\n"
-    "#define MUL(dest, mask, src0, src1) dest.mask = _MUL(_in(src0), _in(src1)).mask\n"
-    "vec4 _MUL(vec4 src0, vec4 src1)\n" 
-    "{\n"
-    "  return src0 * src1;\n"
-    "}\n"
-    "\n"
-    "#define ADD(dest, mask, src0, src1) dest.mask = _ADD(_in(src0), _in(src1)).mask\n"
-    "vec4 _ADD(vec4 src0, vec4 src1)\n" 
-    "{\n"
-    "  return src0 + src1;\n"
-    "}\n"
-    "\n"
-    "#define MAD(dest, mask, src0, src1, src2) dest.mask = _MAD(_in(src0), _in(src1), _in(src2)).mask\n"
-    "vec4 _MAD(vec4 src0, vec4 src1, vec4 src2)\n" 
-    "{\n"
-    "  return src0 * src1 + src2;\n"
-    "}\n"
-    "\n"
-    "#define DP3(dest, mask, src0, src1) dest.mask = _DP3(_in(src0), _in(src1)).mask\n"
-    "vec4 _DP3(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return vec4(dot(src0.xyz, src1.xyz));\n"
-    "}\n"
-    "\n"
-    "#define DPH(dest, mask, src0, src1) dest.mask = _DPH(_in(src0), _in(src1)).mask\n"
-    "vec4 _DPH(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return vec4(dot(vec4(src0.xyz, 1.0), src1));\n"
-    "}\n"
-    "\n"
-    "#define DP4(dest, mask, src0, src1) dest.mask = _DP4(_in(src0), _in(src1)).mask\n"
-    "vec4 _DP4(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return vec4(dot(src0, src1));\n"
-    "}\n"
-    "\n"
-    "#define DST(dest, mask, src0, src1) dest.mask = _DST(_in(src0), _in(src1)).mask\n"
-    "vec4 _DST(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return vec4(1.0,\n"
-    "              src0.y * src1.y,\n"
-    "              src0.z,\n"
-    "              src1.w);\n"
-    "}\n"
-    "\n"
-    "#define MIN(dest, mask, src0, src1) dest.mask = _MIN(_in(src0), _in(src1)).mask\n"
-    "vec4 _MIN(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return min(src0, src1);\n"
-    "}\n"
-    "\n"
-    "#define MAX(dest, mask, src0, src1) dest.mask = _MAX(_in(src0), _in(src1)).mask\n"
-    "vec4 _MAX(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return max(src0, src1);\n"
-    "}\n"
-    "\n"
-    "#define SLT(dest, mask, src0, src1) dest.mask = _SLT(_in(src0), _in(src1)).mask\n"
-    "vec4 _SLT(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return vec4(lessThan(src0, src1));\n"
-    "}\n"
-    "\n"
-    "#define ARL(dest, src) dest = _ARL(_in(src).x)\n"
-    "int _ARL(float src)\n"
-    "{\n"
-    "  return int(floor(src));\n"
-    "}\n"
-    "\n"
-    "#define SGE(dest, mask, src0, src1) dest.mask = _SGE(_in(src0), _in(src1)).mask\n"
-    "vec4 _SGE(vec4 src0, vec4 src1)\n"
-    "{\n"
-    "  return vec4(greaterThanEqual(src0, src1));\n"
-    "}\n"
-    "\n"
-    "#define RCP(dest, mask, src) dest.mask = _RCP(_in(src).x).mask\n"
-    "vec4 _RCP(float src)\n"
-    "{\n"
-    "  return vec4(1.0 / src);\n"
-    "}\n"
-    "\n"
-    "#define RCC(dest, mask, src) dest.mask = _RCC(_in(src).x).mask\n"
-    "vec4 _RCC(float src)\n"
-    "{\n"
-    "  float t = 1.0 / src;\n"
-    "  if (t > 0.0) {\n"
-    "    t = clamp(t, 5.42101e-020, 1.884467e+019);\n"
-    "  } else {\n"
-    "    t = clamp(t, -1.884467e+019, -5.42101e-020);\n"
-    "  }\n"
-    "  return vec4(t);\n"
-    "}\n"
-    "\n"
-    "#define RSQ(dest, mask, src) dest.mask = _RSQ(_in(src).x).mask\n"
-    "vec4 _RSQ(float src)\n"
-    "{\n"
-    "  if (src == 0.0) { return vec4(INFINITY); }\n"
-    "  if (isinf(src)) { return vec4(0.0); }\n"
-    "  return vec4(inversesqrt(abs(src)));\n"
-    "}\n"
-    "\n"
-    "#define EXP(dest, mask, src) dest.mask = _EXP(_in(src).x).mask\n"
-    "vec4 _EXP(float src)\n"
-    "{\n"
-    "  return vec4(exp2(src));\n"
-    "}\n"
-    "\n"
-    "#define LOG(dest, mask, src) dest.mask = _LOG(_in(src).x).mask\n"
-    "vec4 _LOG(float src)\n"
-    "{\n"
-    "  return vec4(log2(src));\n"
-    "}\n"
-    "\n"
-    "#define LIT(dest, mask, src) dest.mask = _LIT(_in(src)).mask\n"
-    "vec4 _LIT(vec4 src)\n"
-    "{\n"
-    "  vec4 s = src;\n"
-    "  float epsilon = 1.0 / 256.0;\n"
-    "  s.w = clamp(s.w, -(128.0 - epsilon), 128.0 - epsilon);\n"
-    "  s.x = max(s.x, 0.0);\n"
-    "  s.y = max(s.y, 0.0);\n"
-    "  vec4 t = vec4(1.0, 0.0, 0.0, 1.0);\n"
-    "  t.y = s.x;\n"
-#if 1
-    "  t.z = (s.x > 0.0) ? exp2(s.w * log2(s.y)) : 0.0;\n"
-#else
-    "  t.z = (s.x > 0.0) ? pow(s.y, s.w) : 0.0;\n"
-#endif
-    "  return t;\n"
-    "}\n";
+#include "nv2a_vsh_operations.inl"
+
+    "\n";
 
 void vsh_translate(uint16_t version,
-                       const uint32_t *tokens,
-                       unsigned int length,
-                       QString *header, QString *body)
+                   const uint32_t *tokens,
+                   unsigned int length,
+                   QString *header, QString *body)
 {
 
 
@@ -723,6 +597,21 @@ void vsh_translate(uint16_t version,
         }
     }
     assert(has_final);
+
+    /* Convert the final vertex to actual GLSL floats */
+    qstring_append(body, "\n"
+                         "  oPos = IFloat4ToVec4(rPos);\n"
+                         "  oD0 = IFloat4ToVec4(rD0);\n"
+                         "  oD1 = IFloat4ToVec4(rD1);\n"
+                         "  oFog = IFloat4ToVec4(rFog);\n"
+                         "  oPts = IFloat4ToVec4(rPts);\n"
+                         "  oB0 = IFloat4ToVec4(rB0);\n"
+                         "  oB1 = IFloat4ToVec4(rB1);\n"
+                         "  oT0 = IFloat4ToVec4(rT0);\n"
+                         "  oT1 = IFloat4ToVec4(rT1);\n"
+                         "  oT2 = IFloat4ToVec4(rT2);\n"
+                         "  oT3 = IFloat4ToVec4(rT3);\n"
+                         "\n");
 
     /* pre-divide and output the generated W so we can do persepctive correct
      * interpolation manually. OpenGL can't, since we give it a W of 1 to work

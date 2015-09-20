@@ -233,22 +233,22 @@ static void generate_fixed_function(const ShaderState state,
 
     /* generate vertex shader mimicking fixed function */
     qstring_append(header,
-"#define position      v0\n"
-"#define weight        v1\n"
-"#define normal        v2.xyz\n"
-"#define diffuse       v3\n"
-"#define specular      v4\n"
-"#define fogCoord      v5.x\n"
-"#define pointSize     v6\n"
-"#define backDiffuse   v7\n"
-"#define backSpecular  v8\n"
-"#define texture0      v9\n"
-"#define texture1      v10\n"
-"#define texture2      v11\n"
-"#define texture3      v12\n"
-"#define reserved1     v13\n"
-"#define reserved2     v14\n"
-"#define reserved3     v15\n"
+"#define position      IFloat4ToVec4(v0)\n"
+"#define weight        IFloat4ToVec4(v1)\n"
+"#define normal        IFloat4ToVec4(v2).xyz\n"
+"#define diffuse       IFloat4ToVec4(v3)\n"
+"#define specular      IFloat4ToVec4(v4)\n"
+"#define fogCoord      IFloatToFloat(v5.x)\n"
+"#define pointSize     IFloat4ToVec4(v6)\n"
+"#define backDiffuse   IFloat4ToVec4(v7)\n"
+"#define backSpecular  IFloat4ToVec4(v8)\n"
+"#define texture0      IFloat4ToVec4(v9)\n"
+"#define texture1      IFloat4ToVec4(v10)\n"
+"#define texture2      IFloat4ToVec4(v11)\n"
+"#define texture3      IFloat4ToVec4(v12)\n"
+"#define reserved1     IFloat4ToVec4(v13)\n"
+"#define reserved2     IFloat4ToVec4(v14)\n"
+"#define reserved3     IFloat4ToVec4(v15)\n"
 "\n");
 
     qstring_append(header,
@@ -563,18 +563,87 @@ static void generate_fixed_function(const ShaderState state,
 
 }
 
+static void generate_attribute_parser(const ShaderState state,
+                                      QString *header, QString *body) {
+
+    const char* types[] = {
+      "uvec4",
+      "ivec4",
+      "uvec4",
+      NULL,
+      "uvec4",
+      "ivec4",
+      "uint"
+    };
+
+    const char* parsers[] = {
+      "parseNormalizedUint8BGRA",
+      "parseNormalizedInt16",
+      "parseFloat32",
+      NULL,
+      "parseNormalizedUint8RGBA",
+      "parseInt16",
+      "parseCompressed"
+    };
+
+    int i;
+    qstring_append_fmt(body, "\n");
+    for(i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+        enum VshAttributeType type = state.attribute_type[i];
+        unsigned int count;
+        if (type == ATTRIBUTE_TYPE_COMPRESSED) {
+            count = 4;
+        } else {
+            count = state.attribute_count[i];
+        }
+        const char* mask[] = { ".x", ".xy", ".xyz", "" };
+        qstring_append_fmt(header, "IFloat4 v%d = IFloat4(IFloatZero, IFloatZero, IFloatZero, IFloatOne);\n", i);
+        if (count > 0) {
+            assert(type < ARRAY_SIZE(types));
+            qstring_append_fmt(header, "in %s v%dData;\n",
+                               types[type], i);
+            assert((count - 1) < ARRAY_SIZE(mask));
+            assert(type < ARRAY_SIZE(parsers));
+            qstring_append_fmt(body, "  v%d%s = %s(v%dData)%s;\n",
+                               i, mask[count - 1],
+                               parsers[type], i, mask[count - 1]);
+        }
+
+    }
+    qstring_append_fmt(body, "\n");
+
+}
+
 static QString *generate_vertex_shader(const ShaderState state,
                                        char vtx_prefix)
 {
-    int i;
     QString *header = qstring_from_str("#version 330\n"
+                                  "\n"
+#include "nv2a_vsh_ifloat.inl"
+                                  "\n"
+#include "nv2a_vsh_parse.inl"
                                   "\n"
                                   "uniform vec2 clipRange;\n"
                                   "uniform vec2 surfaceSize;\n"
                                   "\n"
+                                  /* FIXME: Make sure we init all of these in the code and don't init them here.
+                                   *        VP will init rPos etc. + FFP has full control anyway
+                                   */
+                                  "vec4 oPos = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oD0 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oD1 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oB0 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oB1 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oPts = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oFog = vec4(1.0,0.0,0.0,1.0);\n"
+                                  "vec4 oT0 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oT1 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oT2 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "vec4 oT3 = vec4(0.0,0.0,0.0,1.0);\n"
+                                  "\n"
                                   /* All constants in 1 array declaration */
                                   "layout(shared) uniform VertexConstants {\n"
-                                  "  uniform vec4 c[192];\n"
+                                  "  uniform IFloat4 c[192];\n"
                                   "};\n"
                                   "\n"
                                   /* FIXME: Most [all?] of these are probably part of the constant space */
@@ -582,48 +651,21 @@ static QString *generate_vertex_shader(const ShaderState state,
                                   "uniform vec4 fogPlane;\n"
                                   "uniform float fogParam[2];\n"
                                   "\n"
-                                  "vec4 oPos = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oD0 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oD1 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oB0 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oB1 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oPts = vec4(0.0,0.0,0.0,1.0);\n"
-    /* FIXME: NV_vertex_program says: "FOGC is the transformed vertex's fog
-     * coordinate. The register's first floating-point component is interpolated
-     * across the assembled primitive during rasterization and used as the fog
-     * distance to compute per-fragment the fog factor when fog is enabled.
-     * However, if both fog and vertex program mode are enabled, but the FOGC
-     * vertex result register is not written, the fog factor is overridden to
-     * 1.0. The register's other three components are ignored."
-     *
-     * That probably means it will read back as vec4(0.0, 0.0, 0.0, 1.0) but
-     * will be set to 1.0 AFTER the VP if it was never written?
-     * We should test on real hardware..
-     *
-     * We'll force 1.0 for oFog.x for now.
-     */
-                                  "vec4 oFog = vec4(1.0,0.0,0.0,1.0);\n"
-                                  "vec4 oT0 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oT1 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oT2 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "vec4 oT3 = vec4(0.0,0.0,0.0,1.0);\n"
-                                  "\n"
                                   STRUCT_VERTEX_DATA);
     qstring_append_fmt(header, "noperspective out VertexData %c_vtx;\n",
                        vtx_prefix);
     qstring_append_fmt(header, "#define vtx %c_vtx\n",
                        vtx_prefix);
     qstring_append(header, "\n");
-    for(i = 0; i < 16; i++) {
-        qstring_append_fmt(header, "in vec4 v%d;\n", i);
-    }
-    qstring_append(header, "\n");
 
     QString *body = qstring_from_str("void main() {\n");
 
+    /* Parse all arguments */
+
+    generate_attribute_parser(state, header, body);
+
     if (state.fixed_function) {
         generate_fixed_function(state, header, body);
-
     } else if (state.vertex_program) {
         vsh_translate(VSH_VERSION_XVS,
                       (uint32_t*)state.program_data,
@@ -706,19 +748,19 @@ static QString *generate_vertex_shader(const ShaderState state,
         qstring_append(body, "  oFog.xyzw = vec4(1.0);\n");
     }
 
-    /* Set outputs */
+    /* Finalize outputs by clamping */
     qstring_append(body, "\n"
                       "  vtx.D0 = clamp(oD0, 0.0, 1.0) * vtx.inv_w;\n"
                       "  vtx.D1 = clamp(oD1, 0.0, 1.0) * vtx.inv_w;\n"
                       "  vtx.B0 = clamp(oB0, 0.0, 1.0) * vtx.inv_w;\n"
                       "  vtx.B1 = clamp(oB1, 0.0, 1.0) * vtx.inv_w;\n"
+                      "  vtx.Pts = oPts.x;\n"
                       "  vtx.Fog = oFog.x * vtx.inv_w;\n"
                       "  vtx.T0 = oT0 * vtx.inv_w;\n"
                       "  vtx.T1 = oT1 * vtx.inv_w;\n"
                       "  vtx.T2 = oT2 * vtx.inv_w;\n"
                       "  vtx.T3 = oT3 * vtx.inv_w;\n"
                       "  gl_Position = oPos;\n"
-                      "  gl_PointSize = oPts.x;\n"
                       "\n"
                       "}\n");
 
@@ -807,11 +849,10 @@ ShaderBinding* generate_shaders(const ShaderState state)
 
     /* Bind attributes for vertices */
     char tmp[8];
-    for(i = 0; i < 16; i++) {
-        snprintf(tmp, sizeof(tmp), "v%d", i);
+    for(i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+        snprintf(tmp, sizeof(tmp), "v%dData", i);
         glBindAttribLocation(program, i, tmp);
     }
-
 
     /* generate a fragment shader from register combiners */
 

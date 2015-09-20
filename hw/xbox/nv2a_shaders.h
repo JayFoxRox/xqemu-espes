@@ -30,6 +30,8 @@
 #define NV2A_MAX_TRANSFORM_PROGRAM_LENGTH 136
 #define NV2A_VERTEXSHADER_CONSTANTS 192
 #define NV2A_MAX_LIGHTS 8
+#define NV2A_VERTEXSHADER_ATTRIBUTES 16
+#define NV2A_MAX_TEXTURES 4
 
 enum ShaderPrimitiveMode {
     PRIM_TYPE_NONE,
@@ -62,15 +64,15 @@ typedef struct ShaderState {
     uint32_t rgb_inputs[8], rgb_outputs[8];
     uint32_t alpha_inputs[8], alpha_outputs[8];
 
-    bool rect_tex[4];
-    bool compare_mode[4][4];
-    bool alphakill[4];
+    bool rect_tex[NV2A_MAX_TEXTURES];
+    bool compare_mode[NV2A_MAX_TEXTURES][4];
+    bool alphakill[NV2A_MAX_TEXTURES];
 
     bool alpha_test;
     enum PshAlphaFunc alpha_func;
 
-    bool texture_matrix_enable[4];
-    enum VshTexgen texgen[4][4];
+    bool texture_matrix_enable[NV2A_MAX_TEXTURES];
+    enum VshTexgen texgen[NV2A_MAX_TEXTURES][4];
 
     bool fog_enable;
     enum VshFoggen foggen;
@@ -82,6 +84,9 @@ typedef struct ShaderState {
 
     bool lighting;
     enum VshLight light[NV2A_MAX_LIGHTS];
+
+    unsigned int attribute_count[NV2A_VERTEXSHADER_ATTRIBUTES];
+    enum VshAttributeType attribute_type[NV2A_VERTEXSHADER_ATTRIBUTES];
 
     bool fixed_function;
 
@@ -99,6 +104,7 @@ typedef struct ShaderState {
 typedef struct ShaderBinding {
     GLuint gl_program;
     GLenum gl_primitive_mode;
+    //FIXME: Vertex attribute type information
     GLint psh_constant_loc[9][2];
     GLint gl_constants_loc;
 } ShaderBinding;
