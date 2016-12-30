@@ -414,7 +414,7 @@ static void add_stage_code(struct PixelShader *ps,
 
     QString *ab;
     if (output.ab_op == PS_COMBINEROUTPUT_AB_DOT_PRODUCT) {
-        ab = qstring_from_fmt("dot(%s, %s)",
+        ab = qstring_from_fmt("dot(vec3(%s), vec3(%s))",
                               qstring_get_str(a), qstring_get_str(b));
     } else {
         ab = qstring_from_fmt("(%s * %s)",
@@ -423,7 +423,7 @@ static void add_stage_code(struct PixelShader *ps,
 
     QString *cd;
     if (output.cd_op == PS_COMBINEROUTPUT_CD_DOT_PRODUCT) {
-        cd = qstring_from_fmt("dot(%s, %s)",
+        cd = qstring_from_fmt("dot(vec3(%s), vec3(%s))",
                               qstring_get_str(c), qstring_get_str(d));
     } else {
         cd = qstring_from_fmt("(%s * %s)",
