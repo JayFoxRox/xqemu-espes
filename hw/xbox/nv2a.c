@@ -5594,56 +5594,99 @@ static void pstraps_write(void *opaque, hwaddr addr,
     reg_log_write(NV_PSTRAPS, addr, val);
 }
 
+static uint32_t pgraph_rdi_read(PGRAPHState *pg, unsigned int select, unsigned int address) {
+    uint32_t r = 0;
+    switch(select) {
+    case 0x17:
+        assert((address / 4) < NV2A_VERTEXSHADER_CONSTANTS);
+        r = pg->vsh_constants[address / 4][3 - address % 4];
+        break;
+    default:
+        fprintf(stderr, "nv2a: Unknown RDI read address=0x%X, select=0x%X\n", address, select);
+        assert(false);
+        break;
+    }
+    return r;
+}
+
+static void pgraph_rdi_write(PGRAPHState *pg, unsigned int select, unsigned int address, uint32_t val) {
+    switch(select) {
+    case 0x17:
+        assert(false); /* Untested */
+        assert((address / 4) < NV2A_VERTEXSHADER_CONSTANTS);
+        pg->vsh_constants_dirty[address / 4] |=
+            (val != pg->vsh_constants[address / 4][3 - address % 4]);
+        pg->vsh_constants[address / 4][3 - address % 4] = val;
+        break;
+    default:
+        fprintf(stderr, "nv2a: Unknown RDI write address=0x%X, select=0x%X\n", address, select);
+        assert(false);
+        break;
+    }
+}
+
 /* PGRAPH - accelerated 2d/3d drawing engine */
 static uint64_t pgraph_read(void *opaque,
                                   hwaddr addr, unsigned int size)
 {
     NV2AState *d = opaque;
+    PGRAPHState *pg = &d->pgraph;
 
-    qemu_mutex_lock(&d->pgraph.lock);
+    qemu_mutex_lock(&pg->lock);
 
     uint64_t r = 0;
     switch (addr) {
     case NV_PGRAPH_INTR:
-        r = d->pgraph.pending_interrupts;
+        r = pg->pending_interrupts;
         break;
     case NV_PGRAPH_INTR_EN:
-        r = d->pgraph.enabled_interrupts;
+        r = pg->enabled_interrupts;
         break;
     case NV_PGRAPH_NSOURCE:
-        r = d->pgraph.notify_source;
+        r = pg->notify_source;
         break;
     case NV_PGRAPH_CTX_USER:
         SET_MASK(r, NV_PGRAPH_CTX_USER_CHANNEL_3D,
-                 d->pgraph.context[d->pgraph.channel_id].channel_3d);
+                 pg->context[pg->channel_id].channel_3d);
         SET_MASK(r, NV_PGRAPH_CTX_USER_CHANNEL_3D_VALID, 1);
         SET_MASK(r, NV_PGRAPH_CTX_USER_SUBCH,
-                 d->pgraph.context[d->pgraph.channel_id].subchannel << 13);
-        SET_MASK(r, NV_PGRAPH_CTX_USER_CHID, d->pgraph.channel_id);
+                 pg->context[pg->channel_id].subchannel << 13);
+        SET_MASK(r, NV_PGRAPH_CTX_USER_CHID, pg->channel_id);
         break;
     case NV_PGRAPH_TRAPPED_ADDR:
-        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_CHID, d->pgraph.trapped_channel_id);
-        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_SUBCH, d->pgraph.trapped_subchannel);
-        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_MTHD, d->pgraph.trapped_method);
+        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_CHID, pg->trapped_channel_id);
+        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_SUBCH, pg->trapped_subchannel);
+        SET_MASK(r, NV_PGRAPH_TRAPPED_ADDR_MTHD, pg->trapped_method);
         break;
     case NV_PGRAPH_TRAPPED_DATA_LOW:
-        r = d->pgraph.trapped_data[0];
+        r = pg->trapped_data[0];
         break;
     case NV_PGRAPH_FIFO:
-        SET_MASK(r, NV_PGRAPH_FIFO_ACCESS, d->pgraph.fifo_access);
+        SET_MASK(r, NV_PGRAPH_FIFO_ACCESS, pg->fifo_access);
         break;
+    case NV_PGRAPH_RDI_DATA: {
+        unsigned int select = GET_MASK(pg->regs[NV_PGRAPH_RDI_INDEX],
+                                       NV_PGRAPH_RDI_INDEX_SELECT);
+        unsigned int address = GET_MASK(pg->regs[NV_PGRAPH_RDI_INDEX],
+                                        NV_PGRAPH_RDI_INDEX_ADDRESS);
+        r = pgraph_rdi_read(pg, select, address);
+        assert(address < NV_PGRAPH_RDI_INDEX_ADDRESS); /* FIXME: Overflow into select? */
+        SET_MASK(pg->regs[NV_PGRAPH_RDI_INDEX],
+                 NV_PGRAPH_RDI_INDEX_ADDRESS, address + 1);
+        break;
+    }
     case NV_PGRAPH_CHANNEL_CTX_TABLE:
-        r = d->pgraph.context_table >> 4;
+        r = pg->context_table >> 4;
         break;
     case NV_PGRAPH_CHANNEL_CTX_POINTER:
-        r = d->pgraph.context_address >> 4;
+        r = pg->context_address >> 4;
         break;
     default:
-        r = d->pgraph.regs[addr];
+        r = pg->regs[addr];
         break;
     }
 
-    qemu_mutex_unlock(&d->pgraph.lock);
+    qemu_mutex_unlock(&pg->lock);
 
     reg_log_read(NV_PGRAPH, addr, r);
     return r;
@@ -5661,55 +5704,67 @@ static void pgraph_write(void *opaque, hwaddr addr,
                                uint64_t val, unsigned int size)
 {
     NV2AState *d = opaque;
+    PGRAPHState *pg = &d->pgraph;
 
     reg_log_write(NV_PGRAPH, addr, val);
 
-    qemu_mutex_lock(&d->pgraph.lock);
+    qemu_mutex_lock(&pg->lock);
 
     switch (addr) {
     case NV_PGRAPH_INTR:
-        d->pgraph.pending_interrupts &= ~val;
-        qemu_cond_broadcast(&d->pgraph.interrupt_cond);
+        pg->pending_interrupts &= ~val;
+        qemu_cond_broadcast(&pg->interrupt_cond);
         break;
     case NV_PGRAPH_INTR_EN:
-        d->pgraph.enabled_interrupts = val;
+        pg->enabled_interrupts = val;
         break;
     case NV_PGRAPH_CTX_CONTROL:
-        d->pgraph.channel_valid = (val & NV_PGRAPH_CTX_CONTROL_CHID);
+        pg->channel_valid = (val & NV_PGRAPH_CTX_CONTROL_CHID);
         break;
     case NV_PGRAPH_CTX_USER:
         pgraph_set_context_user(d, val);
         break;
     case NV_PGRAPH_INCREMENT:
         if (val & NV_PGRAPH_INCREMENT_READ_3D) {
-            SET_MASK(d->pgraph.regs[NV_PGRAPH_SURFACE],
+            SET_MASK(pg->regs[NV_PGRAPH_SURFACE],
                      NV_PGRAPH_SURFACE_READ_3D,
-                     (GET_MASK(d->pgraph.regs[NV_PGRAPH_SURFACE],
+                     (GET_MASK(pg->regs[NV_PGRAPH_SURFACE],
                               NV_PGRAPH_SURFACE_READ_3D)+1)
-                        % GET_MASK(d->pgraph.regs[NV_PGRAPH_SURFACE],
+                        % GET_MASK(pg->regs[NV_PGRAPH_SURFACE],
                                    NV_PGRAPH_SURFACE_MODULO_3D) );
-            qemu_cond_broadcast(&d->pgraph.flip_3d);
+            qemu_cond_broadcast(&pg->flip_3d);
         }
         break;
     case NV_PGRAPH_FIFO:
-        d->pgraph.fifo_access = GET_MASK(val, NV_PGRAPH_FIFO_ACCESS);
-        qemu_cond_broadcast(&d->pgraph.fifo_access_cond);
+        pg->fifo_access = GET_MASK(val, NV_PGRAPH_FIFO_ACCESS);
+        qemu_cond_broadcast(&pg->fifo_access_cond);
         break;
+    case NV_PGRAPH_RDI_DATA: {
+        unsigned int select = GET_MASK(pg->regs[NV_PGRAPH_RDI_INDEX],
+                                       NV_PGRAPH_RDI_INDEX_SELECT);
+        unsigned int address = GET_MASK(pg->regs[NV_PGRAPH_RDI_INDEX],
+                                        NV_PGRAPH_RDI_INDEX_ADDRESS);
+        pgraph_rdi_write(pg, select, address, val);
+        assert(address < NV_PGRAPH_RDI_INDEX_ADDRESS); /* FIXME: Overflow into select? */
+        SET_MASK(pg->regs[NV_PGRAPH_RDI_INDEX],
+                 NV_PGRAPH_RDI_INDEX_ADDRESS, address + 1);
+        break;
+    }
     case NV_PGRAPH_CHANNEL_CTX_TABLE:
-        d->pgraph.context_table =
+        pg->context_table =
             (val & NV_PGRAPH_CHANNEL_CTX_TABLE_INST) << 4;
         break;
     case NV_PGRAPH_CHANNEL_CTX_POINTER:
-        d->pgraph.context_address =
+        pg->context_address =
             (val & NV_PGRAPH_CHANNEL_CTX_POINTER_INST) << 4;
         break;
     case NV_PGRAPH_CHANNEL_CTX_TRIGGER:
 
         if (val & NV_PGRAPH_CHANNEL_CTX_TRIGGER_READ_IN) {
             NV2A_DPRINTF("PGRAPH: read channel %d context from %" HWADDR_PRIx "\n",
-                         d->pgraph.channel_id, d->pgraph.context_address);
+                         pg->channel_id, pg->context_address);
 
-            uint8_t *context_ptr = d->ramin_ptr + d->pgraph.context_address;
+            uint8_t *context_ptr = d->ramin_ptr + pg->context_address;
             uint32_t context_user = ldl_le_p((uint32_t*)context_ptr);
 
             NV2A_DPRINTF("    - CTX_USER = 0x%x\n", context_user);
@@ -5723,11 +5778,11 @@ static void pgraph_write(void *opaque, hwaddr addr,
 
         break;
     default:
-        d->pgraph.regs[addr] = val;
+        pg->regs[addr] = val;
         break;
     }
 
-    qemu_mutex_unlock(&d->pgraph.lock);
+    qemu_mutex_unlock(&pg->lock);
 }
 
 
