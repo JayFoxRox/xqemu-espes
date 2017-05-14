@@ -491,6 +491,8 @@ typedef struct PGRAPHState {
     /* FIXME: Move to NV_PGRAPH_BUMPMAT... */
     float bump_env_matrix[NV2A_MAX_TEXTURES-1][4]; /* 3 allowed stages with 2x2 matrix each */
 
+    uint32_t transform_data[4];
+
     GloContext *gl_context;
     GLuint gl_framebuffer;
     GLuint gl_color_buffer, gl_zeta_buffer;
@@ -3642,7 +3644,7 @@ static void pgraph_method(NV2AState *d,
         pg->vsh_constants_dirty[const_load] |=
             (parameter != pg->vsh_constants[const_load][slot%4]);
         pg->vsh_constants[const_load][slot%4] = parameter;
-
+printf("Uploaded %f (0x%08X) to %d %d\n", *(float*)&parameter, parameter, const_load, slot % 4);
         if (slot % 4 == 3) {
             SET_MASK(pg->regs[NV_PGRAPH_CHEOPS_OFFSET],
                      NV_PGRAPH_CHEOPS_OFFSET_CONST_LD_PTR, const_load+1);
@@ -4723,7 +4725,38 @@ static void pgraph_method(NV2AState *d,
     case NV097_SET_SHADER_OTHER_STAGE_INPUT:
         pg->regs[NV_PGRAPH_SHADERCTL] = parameter;
         break;
+    case NV097_SET_TRANSFORM_DATA ...
+            NV097_SET_TRANSFORM_DATA + 12:
+        slot = (method - NV097_SET_TRANSFORM_DATA) / 4;
+        pg->transform_data[slot] = parameter;
+        break;
+    case NV097_LAUNCH_TRANSFORM_PROGRAM:
+        printf("Running tansform program!\n");
 
+
+//FIXME: Run this shit!
+        pg->vsh_constants[0][0] ^= 0x80000000;
+        pg->vsh_constants[0][1] ^= 0x80000000;
+        pg->vsh_constants[0][2] ^= 0x80000000;
+        pg->vsh_constants[0][3] ^= 0x80000000;
+        pg->vsh_constants_dirty[0] = true;
+
+        pg->vsh_constants[128][0] ^= 0x80000000;
+        pg->vsh_constants[128][1] ^= 0x80000000;
+        pg->vsh_constants[128][2] ^= 0x80000000;
+        pg->vsh_constants[128][3] ^= 0x80000000;
+        pg->vsh_constants_dirty[128] = true;
+
+        pg->vsh_constants[191][0] = 0x3F800000;
+        pg->vsh_constants[191][1] = 0xBF800000;
+        pg->vsh_constants[191][2] = 0x40000000;
+        pg->vsh_constants[191][3] = 0xC0000000;
+        pg->vsh_constants_dirty[191] = true;
+
+
+
+
+        break;
     case NV097_SET_TRANSFORM_EXECUTION_MODE:
         SET_MASK(pg->regs[NV_PGRAPH_CSV0_D], NV_PGRAPH_CSV0_D_MODE,
                  GET_MASK(parameter,
