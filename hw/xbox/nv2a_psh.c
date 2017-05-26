@@ -414,7 +414,7 @@ static void add_stage_code(struct PixelShader *ps,
 
     QString *ab;
     if (output.ab_op == PS_COMBINEROUTPUT_AB_DOT_PRODUCT) {
-        ab = qstring_from_fmt("dot(%s, %s)",
+        ab = qstring_from_fmt("dot(vec3(%s), vec3(%s))",
                               qstring_get_str(a), qstring_get_str(b));
     } else {
         ab = qstring_from_fmt("(%s * %s)",
@@ -423,7 +423,7 @@ static void add_stage_code(struct PixelShader *ps,
 
     QString *cd;
     if (output.cd_op == PS_COMBINEROUTPUT_CD_DOT_PRODUCT) {
-        cd = qstring_from_fmt("dot(%s, %s)",
+        cd = qstring_from_fmt("dot(vec3(%s), vec3(%s))",
                               qstring_get_str(c), qstring_get_str(d));
     } else {
         cd = qstring_from_fmt("(%s * %s)",
@@ -522,20 +522,171 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     ps->varE = ps->varF = NULL;
 }
 
-
+static const char* get_dotmap(struct PixelShader *ps, unsigned int stage) {
+    return "dotMapZeroToOne";
+/*
+    switch (ps->dotmapping[stage]) {
+    case PS_DOTMAPPING_ZERO_TO_ONE: return "dotMapZeroToOne";
+    case PS_DOTMAPPING_MINUS1_TO_1_D3D: return "dotMapMinusOneToOneD3D";
+    case PS_DOTMAPPING_MINUS1_TO_1_GL: return "dotMapMinusOneToOneGL";
+    case PS_DOTMAPPING_MINUS1_TO_1: return "dotMapMinusOneToOne";
+    case PS_DOTMAPPING_HILO_1: return "dotMapHiLoOne";
+    case PS_DOTMAPPING_HILO_HEMISPHERE_D3D: return "dotMapHiLoHemisphereD3D";
+    case PS_DOTMAPPING_HILO_HEMISPHERE_GL: return "dotMapHiLoHemisphereGL";
+    case PS_DOTMAPPING_HILO_HEMISPHERE: return "dotMapHiLoHemisphere";
+    default:
+        assert(false);
+        break
+    }
+*/
+}
 
 static QString* psh_convert(struct PixelShader *ps)
 {
     int i;
 
     QString *preflight = qstring_new();
-    qstring_append(preflight, STRUCT_VERTEX_DATA);
-    qstring_append(preflight, "noperspective in VertexData g_vtx;\n");
-    qstring_append(preflight, "#define vtx g_vtx\n");
-    qstring_append(preflight, "\n");
-    qstring_append(preflight, "out vec4 fragColor;\n");
-    qstring_append(preflight, "\n");
-    qstring_append(preflight, "uniform vec4 fogColor;\n");
+    qstring_append(preflight,
+STRUCT_VERTEX_DATA
+"noperspective in VertexData g_vtx;\n"
+"#define vtx g_vtx\n"
+"\n"
+"out vec4 fragColor;\n"
+"\n"
+"uniform vec4 fogColor;\n"
+"\n"
+
+/* dotmap functions */
+
+"uvec4 texUint8(vec4 tex) {\n"
+"  return uvec4(tex * 255.0);\n"
+"}\n"
+"\n"
+"uint texUint32(vec4 tex) {\n"
+"  uvec4 utex = texUint8(tex);\n"
+"  return utex.a << 24u | utex.r << 16u | utex.g << 8u | utex.b;\n"
+"}\n"
+"\n"
+"uvec2 texUint16(vec4 tex) {\n"
+"  uint utex = texUint32(tex);\n"
+"  return uvec2((utex >> 16u) & 0xFFFFu, utex & 0xFFFFu);\n"
+"}\n"
+"\n"
+"vec3 dotMapZeroToOne(vec4 tex) {\n"
+"  /* 0x00 = 0.0\n"
+"   * 0xFF = 1.0\n"
+"   */\n"
+"  return tex.rgb;\n"
+"}\n"
+"\n"
+"float mapMinusOneToOneD3D(uint x) {\n"
+"  /* 0x00 = -128/127\n"
+"   * 0x01 = -1.0\n"
+"   * 0x80 = 0.0\n"
+"   * 0xFF = 1.0\n"
+"   */\n"
+"  return float(x - 128u) / 127.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapMinusOneToOneD3D(vec4 tex) {\n"
+"  uvec4 argb = texUint8(tex);\n"
+"  return vec3(mapMinusOneToOneD3D(argb.r),\n"
+"              mapMinusOneToOneD3D(argb.g),\n"
+"              mapMinusOneToOneD3D(argb.b));\n"
+"}\n"
+"\n"
+"float mapMinusOneToOneGL(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x80 = -1.0\n"
+"   * 0x7F = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 7u) - 1u) << 8u) | x);\n"
+"  return float(sx + 128) / 127.5 - 1.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapMinusOneToOneGL(vec4 tex) {\n"
+"  uvec4 argb = texUint8(tex);\n"
+"  return vec3(mapMinusOneToOneGL(argb.r),\n"
+"              mapMinusOneToOneGL(argb.g),\n"
+"              mapMinusOneToOneGL(argb.b));\n"
+"}\n"
+"\n"
+"float mapMinusOneToOne(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x80 = -128/127\n"
+"   * 0x7F = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 7u) - 1u) << 8u) | x);\n"
+"  return float(sx) / 127.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapMinusOneToOne(vec4 tex) {\n"
+"  uvec4 argb = texUint8(tex);\n"
+"  return vec3(mapMinusOneToOne(argb.r),\n"
+"              mapMinusOneToOne(argb.g),\n"
+"              mapMinusOneToOne(argb.b));\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoOne(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  /* 0x0000 = 0.0\n"
+"   * 0xFFFF = 1.0\n"
+"   */\n"
+"  return vec3(vec2(hl.xy) / 65535.0, 1.0);\n"
+"}\n"
+"\n"
+"float mapHiLoHemisphereD3D(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x8000 = -1.0\n"
+"   * 0x0000 = 0.0\n"
+"   * 0x7FFF = 32767/32768\n"
+"   */\n"
+"  int sx = int((~((x >> 15u) - 1u) << 16u) | x);\n"
+"  return float(sx) / 32768.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoHemisphereD3D(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  return vec3(mapHiLoHemisphereD3D(hl.x),\n"
+"              mapHiLoHemisphereD3D(hl.y),\n"
+"              sqrt(1.0 - hl.x * hl.x - hl.y * hl.y));\n"
+"}\n"
+"\n"
+"\n"
+"float mapHiLoHemisphereGL(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x8000 = -1.0\n"
+"   * 0x7FFF = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 15u) - 1u) << 16u) | x);\n"
+"  return float(sx + 32768) / 32767.5 - 1.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoHemisphereGL(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  return vec3(mapHiLoHemisphereGL(hl.x),\n"
+"              mapHiLoHemisphereGL(hl.y),\n"
+"              sqrt(1.0 - hl.x * hl.x - hl.y * hl.y));\n"
+"}\n"
+"\n"
+"float mapHiLoHemisphere(uint x) {\n"
+"  /* [2 complement]\n"
+"   * 0x8000 = -32768/32767\n"
+"   * 0x8001 = -1.0\n"
+"   * 0x0000 = 0.0\n"
+"   * 0x7FFF = 1.0\n"
+"   */\n"
+"  int sx = int((~((x >> 15u) - 1u) << 16u) | x);\n"
+"  return float(sx) / 32767.0;\n"
+"}\n"
+"\n"
+"vec3 dotMapHiLoHemisphere(vec4 tex) {\n"
+"  uvec2 hl = texUint16(tex);\n"
+"  return vec3(mapHiLoHemisphere(hl.x),\n"
+"              mapHiLoHemisphere(hl.y),\n"
+"              sqrt(1.0 - hl.x * hl.x - hl.y * hl.y));\n"
+"}\n"
+"\n");
 
     /* calculate perspective-correct inputs */
     QString *vars = qstring_new();
@@ -564,6 +715,7 @@ static QString* psh_convert(struct PixelShader *ps)
                                i);
             break;
         case PS_TEXTUREMODES_PROJECT2D:
+            /* tex */
             if (ps->state.rect_tex[i]) {
                 sampler_type = "sampler2DRect";
             } else {
@@ -573,34 +725,37 @@ static QString* psh_convert(struct PixelShader *ps)
                                i, i, i);
             break;
         case PS_TEXTUREMODES_PROJECT3D:
+            /* tex */
             sampler_type = "sampler3D";
             qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
                                i, i, i);
             break;
         case PS_TEXTUREMODES_CUBEMAP:
+            /* tex */
             sampler_type = "samplerCube";
             qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, pT%d.xyz / pT%d.w);\n",
                                i, i, i, i);
             break;
         case PS_TEXTUREMODES_PASSTHRU:
+            /* texcoord */
             qstring_append_fmt(vars, "vec4 t%d = pT%d;\n", i, i);
             break;
-        case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
-            assert(false);
-            break;
         case PS_TEXTUREMODES_DPNDNT_AR:
+            /* texreg2ar */
             assert(!ps->state.rect_tex[i]);
             sampler_type = "sampler2D";
             qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%d.ar);\n",
                                i, i, ps->input_tex[i]);
             break;
         case PS_TEXTUREMODES_DPNDNT_GB:
+            /* texreg2bg */
             assert(!ps->state.rect_tex[i]);
             sampler_type = "sampler2D";
             qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, t%d.gb);\n",
                                i, i, ps->input_tex[i]);
             break;
         case PS_TEXTUREMODES_BUMPENVMAP_LUM:
+            /* texbeml */
             qstring_append_fmt(preflight, "uniform float bumpScale%d;\n", i);
             qstring_append_fmt(preflight, "uniform float bumpOffset%d;\n", i);
             qstring_append_fmt(ps->code, "/* BUMPENVMAP_LUM for stage %d */\n", i);
@@ -608,6 +763,7 @@ static QString* psh_convert(struct PixelShader *ps)
                                i, i, i, ps->input_tex[i], i);
             /* No break here! Extension of BUMPENVMAP */
         case PS_TEXTUREMODES_BUMPENVMAP:
+            /* texbem */
             assert(!ps->state.rect_tex[i]);
             sampler_type = "sampler2D";
             qstring_append_fmt(preflight, "uniform mat2 bumpMat%d;\n", i);
@@ -616,6 +772,7 @@ static QString* psh_convert(struct PixelShader *ps)
                                i, i, i, ps->input_tex[i], i, i);
             break;
         case PS_TEXTUREMODES_CLIPPLANE: {
+            /* texkill */
             int j;
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_CLIPPLANE */\n",
                                i);
@@ -626,9 +783,70 @@ static QString* psh_convert(struct PixelShader *ps)
             }
             break;
         }
+        case PS_TEXTUREMODES_DOT_ST:
+            /* texm3x2tex */
+            assert(i >= 2);
+            qstring_append_fmt(vars, "float tmpV%d = dot(pT%d.xyz, %s(t%d));",
+                               i, i, get_dotmap(ps, i), ps->input_tex[i]);
+
+            assert(!ps->state.rect_tex[i]);
+            sampler_type = "sampler2D";
+            qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, vec2(t%d.x, tmpV%d));\n",
+                               i, i, i - 1, i);
+
+            break;
+        case PS_TEXTUREMODES_DOT_ZW:
+            /* texm3x2depth */
+            assert(i >= 2);
+            qstring_append_fmt(vars, "float tmpW%d = dot(pT%d.xyz, %s(t%d));",
+                               i, i, get_dotmap(ps, i), ps->input_tex[i]);
+
+            /* FIXME: we need to write the depth value here, however, we must
+             *        know about the xbox framebuffer depth range etc to scale
+             *        it?!
+             *
+             *        The basic formula should be:
+             *        ...("gl_FragDepth = t%d.x / tmpW%d\n", i - 1, i);
+             */
+            /* FIXME: is t%d.x correct? Or maybe use another component? If the
+             *        previous stage is texm3x2pad it doesn't matter, however,
+             *        if it is not, it DOES - or would the hw crash or behave
+             *        differently?
+             */
+
+            qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* texm3x2depth */\n",
+                               i);
+            //assert(false);
+            break;
         case PS_TEXTUREMODES_DOTPRODUCT:
-            qstring_append_fmt(vars, "vec4 t%d = vec4(dot(pT%d.xyz, t%d.rgb));\n",
-                               i, i, ps->input_tex[i]);
+            qstring_append_fmt(vars, "vec4 t%d = vec4(dot(pT%d.xyz, %s(t%d)));\n",
+                               i, i, get_dotmap(ps, i), ps->input_tex[i]);
+            break;
+        case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
+        case PS_TEXTUREMODES_DOT_RFLCT_DIFF: {
+            /* Normal = (s,t,r) Eye-Vector stored in C0 */
+            /* FIXME: vec4?! */
+            QString* c0 = get_var(ps, PS_REGISTER_C0, false);
+            qstring_append_fmt(vars, "vec3 eyeVector%d = %s.xyz;\n", i, qstring_get_str(c0)); /* FIXME: Is this correct? */
+            QDECREF(c0);
+            qstring_append_fmt(vars, "vec3 reflect%d =  2.0 * pT%d.xyz * dot(pT%d.xyz, eyeVector%d) / dot(pT%d.xyz, pT%d.xyz) - eyeVector%d;\n",
+                               i, i, i, i, i, i, i);
+            sampler_type = "samplerCube";
+            qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, reflect%d);\n",
+                               i, i, i);
+            break;
+        }
+        case PS_TEXTUREMODES_DOT_RFLCT_SPEC_CONST:
+            /* texm3x3spec */
+
+            /* Normal = (s,t,r) Eye-Vector from q components */
+            /* FIXME: vec4?! */
+            qstring_append_fmt(vars, "vec3 eyeVector%d = vec3(pT0.w, pT1.w, pT2.w);\n", i);
+            qstring_append_fmt(vars, "vec3 reflect%d =  2.0 * pT%d.xyz * dot(pT%d.xyz, eyeVector%d) / dot(pT%d.xyz, pT%d.xyz) - eyeVector%d;\n",
+                               i, i, i, i, i, i, i);
+            sampler_type = "samplerCube";
+            qstring_append_fmt(vars, "vec4 t%d = texture(texSamp%d, reflect%d);\n",
+                               i, i, i);
             break;
         default:
             printf("%x\n", ps->tex_modes[i]);
@@ -649,14 +867,14 @@ static QString* psh_convert(struct PixelShader *ps)
 
     for (i = 0; i < ps->num_stages; i++) {
         ps->cur_stage = i;
-        qstring_append_fmt(ps->code, "// Stage %d\n", i);
+        qstring_append_fmt(ps->code, "/* Stage %d */\n", i);
         add_stage_code(ps, ps->stage[i].rgb_input, ps->stage[i].rgb_output, "rgb", false);
         add_stage_code(ps, ps->stage[i].alpha_input, ps->stage[i].alpha_output, "a", true);
     }
 
     if (ps->final_input.enabled) {
         ps->cur_stage = 8;
-        qstring_append(ps->code, "// Final Combiner\n");
+        qstring_append(ps->code, "/* Final Combiner */\n");
         add_final_stage_code(ps, ps->final_input);
     }
 
@@ -742,6 +960,52 @@ static void parse_combiner_output(uint32_t value, struct OutputInfo *out)
     out->mapping = flags & 0x38;
     out->ab_alphablue = flags & 0x80;
     out->cd_alphablue = flags & 0x40;
+}
+
+enum PshSampler psh_texture_sampler(unsigned int stage,
+                                    uint32_t shader_stage_program,
+                                    bool rect_tex)
+{
+    assert(stage < 4);
+    unsigned int mode = (shader_stage_program >> (stage * 5)) & 0x1F;
+
+    enum PshSampler sampler_2d = rect_tex ? SAMPLER_2D_RECT : SAMPLER_2D;
+
+    switch(mode) {
+    case PS_TEXTUREMODES_NONE: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_PROJECT2D: return sampler_2d;
+    case PS_TEXTUREMODES_PROJECT3D:
+        /* FIXME: Support shadowbuffer */
+        if (false) {
+            return rect_tex ? SAMPLER_2D_RECT_SHADOW : SAMPLER_2D_SHADOW;
+        } else {
+            return SAMPLER_3D;
+        }
+    case PS_TEXTUREMODES_CUBEMAP: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_PASSTHRU: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_CLIPPLANE: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_BUMPENVMAP: return sampler_2d;
+    case PS_TEXTUREMODES_BUMPENVMAP_LUM: return sampler_2d;
+    case PS_TEXTUREMODES_BRDF: return SAMPLER_3D;
+    case PS_TEXTUREMODES_DOT_ST:
+        /* FIXME: Maybe NONE? */
+        return sampler_2d;
+    case PS_TEXTUREMODES_DOT_ZW: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_DOT_RFLCT_DIFF: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_DOT_RFLCT_SPEC: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_DOT_STR_3D:
+        /* FIXME: also cubemap support? */
+        return SAMPLER_3D;
+    case PS_TEXTUREMODES_DOT_STR_CUBE: return SAMPLER_CUBEMAP;
+    case PS_TEXTUREMODES_DPNDNT_AR: return sampler_2d;
+    case PS_TEXTUREMODES_DPNDNT_GB: return sampler_2d;
+    case PS_TEXTUREMODES_DOTPRODUCT: return SAMPLER_NONE;
+    case PS_TEXTUREMODES_DOT_RFLCT_SPEC_CONST: return SAMPLER_CUBEMAP;
+    default:
+        assert(false);
+        break;
+    }
+    return SAMPLER_NONE;
 }
 
 QString *psh_translate(const PshState state)

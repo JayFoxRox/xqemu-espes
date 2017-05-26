@@ -35,6 +35,20 @@ enum PshAlphaFunc {
     ALPHA_FUNC_ALWAYS,
 };
 
+enum PshSampler {
+    SAMPLER_NONE,
+    SAMPLER_2D,
+    SAMPLER_2D_RECT,
+    SAMPLER_2D_SHADOW,
+    SAMPLER_2D_RECT_SHADOW,
+    SAMPLER_CUBEMAP,
+    SAMPLER_3D,
+};
+
+enum PshSampler psh_texture_sampler(unsigned int stage,
+                                    uint32_t shader_stage_program,
+                                    bool rect_tex);
+
 typedef struct PshState {
     /* fragment shader - register combiner stuff */
     uint32_t combiner_control;

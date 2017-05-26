@@ -1462,6 +1462,13 @@ static void pgraph_bind_textures(NV2AState *d)
         unsigned int dimensionality =
             GET_MASK(fmt, NV_PGRAPH_TEXFMT0_DIMENSIONALITY);
         unsigned int color_format = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_COLOR);
+
+        /* Check the pixel combiner if this texture needs to be fetched */
+        enum PshSampler sampler =
+            psh_texture_sampler(i, pg->regs[NV_PGRAPH_SHADERPROG],
+                                kelvin_color_format_map[color_format].linear);
+
+
         unsigned int levels = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_MIPMAP_LEVELS);
         unsigned int log_width = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_U);
         unsigned int log_height = GET_MASK(fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_V);
@@ -1512,14 +1519,16 @@ static void pgraph_bind_textures(NV2AState *d)
         assert(!(filter & NV_PGRAPH_TEXFILTER0_BSIGNED));
 
         glActiveTexture(GL_TEXTURE0 + i);
-        if (!enabled) {
-            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, 0);
-            glBindTexture(GL_TEXTURE_1D, 0);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            glBindTexture(GL_TEXTURE_3D, 0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+        glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+        glBindTexture(GL_TEXTURE_1D, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindTexture(GL_TEXTURE_3D, 0);
+        if (!enabled || sampler == SAMPLER_NONE) {
             continue;
         }
+
+        /* FIXME: Verify sampler and gl_target match! */
 
         if (!pg->texture_dirty[i] && pg->texture_binding[i]) {
             glBindTexture(pg->texture_binding[i]->gl_target,
@@ -4430,7 +4439,6 @@ static void pgraph_method(NV2AState *d,
     case NV097_SET_VERTEX_DATA2S ...
             NV097_SET_VERTEX_DATA2S + 0x3c: {
         slot = (method - NV097_SET_VERTEX_DATA2S) / 4;
-        assert(false); /* FIXME: Untested! */
         VertexAttribute *attribute = &pg->vertex_attributes[slot];
         pgraph_allocate_inline_buffer_vertices(pg, slot);
         /* FIXME: Is mapping to [-1,+1] correct? */
@@ -4443,7 +4451,6 @@ static void pgraph_method(NV2AState *d,
         attribute->inline_value[3] = 1.0;
         if (slot == 0) {
             pgraph_finish_inline_buffer_vertex(pg);
-            assert(false); /* FIXME: Untested */
         }
         break;
     }
