@@ -228,6 +228,10 @@
 #   define NV_PGRAPH_INCREMENT_READ_3D                          (1 << 1)
 #define NV_PGRAPH_FIFO                                   0x00000720
 #   define NV_PGRAPH_FIFO_ACCESS                                (1 << 0)
+#define NV_PGRAPH_RDI_INDEX                              0x00000750
+#   define NV_PGRAPH_RDI_INDEX_ADDRESS                        0x00000FFC
+#   define NV_PGRAPH_RDI_INDEX_SELECT                         0x00FF0000
+#define NV_PGRAPH_RDI_DATA                               0x00000754
 #define NV_PGRAPH_CHANNEL_CTX_TABLE                      0x00000780
 #   define NV_PGRAPH_CHANNEL_CTX_TABLE_INST                   0x0000FFFF
 #define NV_PGRAPH_CHANNEL_CTX_POINTER                    0x00000784
@@ -1065,6 +1069,8 @@
 #   define NV097_SET_SHADOW_ZSLOPE_THRESHOLD                  0x00001E68
 #   define NV097_SET_SHADER_STAGE_PROGRAM                     0x00001E70
 #   define NV097_SET_SHADER_OTHER_STAGE_INPUT                 0x00001E78
+#   define NV097_SET_TRANSFORM_DATA                           0x00001E80
+#   define NV097_LAUNCH_TRANSFORM_PROGRAM                     0x00001E90
 #   define NV097_SET_TRANSFORM_EXECUTION_MODE                 0x00001E94
 #       define NV097_SET_TRANSFORM_EXECUTION_MODE_MODE            0x00000003
 #       define NV097_SET_TRANSFORM_EXECUTION_MODE_RANGE_MODE      0xFFFFFFFC
