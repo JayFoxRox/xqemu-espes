@@ -641,3 +641,8 @@ void helper_debug(CPUX86State *env)
     env->exception_index = EXCP_DEBUG;
     cpu_loop_exit(env);
 }
+
+void helper_virtualpc(CPUX86State *env, int x1, int x2)
+{
+    printf("virtualpc x1=0x%02X x2=0x%02X (eax=0x%08X; ecx=0x%08X) at 0x%08X\n", x1, x2, env->regs[R_EAX], env->regs[R_ECX], env->eip);
+}
