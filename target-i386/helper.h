@@ -220,4 +220,8 @@ DEF_HELPER_3(rclq, tl, env, tl, tl)
 DEF_HELPER_3(rcrq, tl, env, tl, tl)
 #endif
 
+/* VirtualPC */
+
+DEF_HELPER_3(virtualpc, void, env, int, int)
+
 #include "exec/def-helper.h"

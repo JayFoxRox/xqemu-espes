@@ -4858,6 +4858,15 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
     /* now check op code */
  reswitch:
     switch(b) {
+    case 0x13F:
+        { /* Virtual PC is 0x0F 0x3F x1 x2 */
+            int x1 = cpu_ldub_code(env, s->pc++);
+            int x2 = cpu_ldub_code(env, s->pc++);
+            gen_update_cc_op(s);
+            gen_jmp_im(pc_start - s->cs_base);
+            gen_helper_virtualpc(cpu_env, tcg_const_i32(x1), tcg_const_i32(x2));
+        }
+        break;
     case 0x0f:
         /**************************/
         /* extended op code */
