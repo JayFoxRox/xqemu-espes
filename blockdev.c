@@ -333,6 +333,9 @@ static DriveInfo *blockdev_init(QDict *bs_opts,
     const char *id;
     bool has_driver_specific_opts;
     BlockDriver *drv = NULL;
+    uint8_t* data_pfi = NULL;
+    uint8_t* data_dmi = NULL;
+    uint8_t* data_ss = NULL;
 
     /* Check common options by copying from bs_opts to opts, all other options
      * stay in bs_opts for processing by bdrv_open(). */
@@ -363,6 +366,7 @@ static DriveInfo *blockdev_init(QDict *bs_opts,
     locked = qemu_opt_get_bool(opts, "locked", false);
 
     file = qemu_opt_get(opts, "file");
+
     serial = qemu_opt_get(opts, "serial");
 
     if ((buf = qemu_opt_get(opts, "discard")) != NULL) {
@@ -485,6 +489,10 @@ static DriveInfo *blockdev_init(QDict *bs_opts,
     if (serial != NULL) {
         dinfo->serial = g_strdup(serial);
     }
+/*    dinfo->pfi = data_pfi;
+    dinfo->dmi = data_dmi;
+    dinfo->ss = data_ss;
+*/
     drive_append(dinfo);
 
     bdrv_set_on_error(dinfo->bdrv, on_read_error, on_write_error);

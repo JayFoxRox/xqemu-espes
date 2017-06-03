@@ -423,6 +423,10 @@ struct IDEState {
     uint8_t *smart_selftest_data;
     /* AHCI */
     int ncq_queues;
+    /* Xbox specific */
+    uint8_t *pfi;
+    uint8_t *dmi;
+    uint8_t *ss;
 };
 
 struct IDEDMAOps {

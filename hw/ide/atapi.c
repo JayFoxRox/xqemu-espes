@@ -79,12 +79,17 @@ static inline int media_present(IDEState *s)
 /* XXX: DVDs that could fit on a CD will be reported as a CD */
 static inline int media_is_dvd(IDEState *s)
 {
+#ifdef TARGET_XBOX
+    //FIXME: Add a flag to signal what kind the media is or get info from the PFI?
+    return true;
+#else
     return (media_present(s) && s->nb_sectors > CD_MAX_SECTORS);
+#endif
 }
 
 static inline int media_is_cd(IDEState *s)
 {
-    return (media_present(s) && s->nb_sectors <= CD_MAX_SECTORS);
+    return (media_present(s) && !media_is_dvd(s));
 }
 
 static void cd_data_to_raw(uint8_t *buf, int lba)
@@ -409,10 +414,56 @@ static inline uint8_t ide_atapi_set_profile(uint8_t *buf, uint8_t *index,
     return 4;
 }
 
-static int ide_dvd_read_structure(IDEState *s, int format,
+static int ide_dvd_read_structure(IDEState *s, int format, int layer,
                                   const uint8_t *packet, uint8_t *buf)
 {
     switch (format) {
+#ifdef TARGET_XBOX
+        case 0x00: /* PFI or SS */
+            {
+                uint8_t *data;
+                if (layer == 0xFE) { /* Xbox SS */
+                    /* FIXME: The address should also be very specific */
+                    data = s->ss;
+                    printf("Returning SS! %p\n", data);
+                } else {
+                    data = s->pfi;
+                    printf("Returning PFI!\n");
+                }
+
+                if (data == NULL) {
+                    return -ASC_INV_FIELD_IN_CMD_PACKET;
+                }
+
+                /* Size of buffer, not including 2 byte size field */
+                stw_be_p(buf, 2048 + 2);
+
+                memcpy(&buf[4], data, 2048);
+
+                /* 2k data + 4 byte header */
+                return (2048 + 4);
+            }
+
+        case 0x04: /* DMI */
+            assert(false); /* FIXME: Untested, Xbox never does this?! */
+
+            if (s->dmi == NULL) {
+                return -ASC_INV_FIELD_IN_CMD_PACKET;
+            }
+
+            /* Size of buffer, not including 2 byte size field */
+            stw_be_p(buf, 2048 + 2);
+
+            memcpy(&buf[4], s->dmi, 2048);
+
+            /* 2k data + 4 byte header */
+            return (2048 + 4);
+
+        default: /* TODO: formats beyond DVD-ROM requires */
+            fprintf(stderr, "Unhandled DVD READ STRUCTURE format\n");
+            assert(false);
+            return -ASC_INV_FIELD_IN_CMD_PACKET;
+#else
         case 0x0: /* Physical format information */
             {
                 int layer = packet[6];
@@ -493,6 +544,7 @@ static int ide_dvd_read_structure(IDEState *s, int format,
 
         default: /* TODO: formats beyond DVD-ROM requires */
             return -ASC_INV_FIELD_IN_CMD_PACKET;
+#endif
     }
 }
 
@@ -633,6 +685,10 @@ static void cmd_inquiry(IDEState *s, uint8_t *buf)
     padstr8(buf + 8, 8, "QEMU");
     padstr8(buf + 16, 16, "QEMU DVD-ROM");
     padstr8(buf + 32, 4, s->version);
+#ifdef TARGET_XBOX
+    fprintf(stderr, "Returning bad DVD inquiry\n");
+    assert(false); // FIXME: This is not a valid Xbox DVD drive!
+#endif
     ide_atapi_cmd_reply(s, 36, max_len);
 }
 
@@ -684,6 +740,51 @@ static void cmd_get_configuration(IDEState *s, uint8_t *buf)
     ide_atapi_cmd_reply(s, len, max_len);
 }
 
+struct {
+    uint8_t buf[20];
+/*
+    buf[8] = MODE_PAGE_XBOX_AUTHENTICATION;
+    buf[9] = 28 - 10;
+    buf[10] = 0; // 0x00 = Video partition / 0x01 = Xbox partition
+    buf[11] = 1; // Unknown (if this is not 1, the Xbox will reject this game?!)
+    buf[12] = 0; // Wether DVD is authenticated
+    buf[13] = (book_type << 4) | book_version;
+    buf[14] = 0; // ?
+    buf[15] = 0; // Challenge id
+    cpu_to_ube32(&buf[16], 0); // Challenge value
+    cpu_to_ube32(&buf[20], 0); // Response value
+    buf[24] = 0; // Unknown
+    buf[25] = 0; // Unknown
+    buf[26] = 0; // Unknown
+    buf[27] = 0; // Unknown
+*/
+} xbox_authentication;
+
+static void cmd_mode_select(IDEState *s, uint8_t *buf)
+{
+    int max_len;
+
+    max_len = ube16_to_cpu(buf + 7);
+
+    printf("\n\n\nMODE SELECT len=0x%X\n\n\n\n", max_len);
+
+#ifdef TARGET_XBOX
+    if (max_len != 0x1C) {
+        //FIXME: Confirm error message or w/e happens
+        ide_atapi_cmd_error(s, ILLEGAL_REQUEST, ASC_INV_FIELD_IN_CMD_PACKET);
+        return;
+    }
+
+    memcpy(&xbox_authentication, &buf[8], max_len - 8);
+
+    printf("Wrote 0x%02X 0x%08X=0x%08X\n", buf[15], ube32_to_cpu(&buf[16]), *(uint32_t*)&buf[16]); // Challenge value
+                //cpu_to_ube32(&buf[20], 0); // Response value);
+
+    //FIXME: Not sure what to respond here?!
+    ide_atapi_cmd_reply(s, max_len, max_len);
+#endif
+}
+
 static void cmd_mode_sense(IDEState *s, uint8_t *buf)
 {
     int action, code;
@@ -693,6 +794,7 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
     action = buf[2] >> 6;
     code = buf[2] & 0x3f;
 
+    printf("\n\n\nMODE SENSE action=0x%02X code=0x%02X max_len=%d\n\n\n\n", action, code, max_len);
     switch(action) {
     case 0: /* current values */
         switch(code) {
@@ -770,6 +872,47 @@ static void cmd_mode_sense(IDEState *s, uint8_t *buf)
             buf[29] = 0;
             ide_atapi_cmd_reply(s, 30, max_len);
             break;
+#ifdef TARGET_XBOX
+        case MODE_PAGE_XBOX_AUTHENTICATION:
+            {
+                uint8_t book_type = 0xD;
+                uint8_t book_version = 0x1;
+
+                printf("Responding xbox auth\n");
+
+                cpu_to_ube16(&buf[0], 28 - 2);
+                buf[2] = 0x70;
+                buf[3] = 0;
+                buf[4] = 0;
+                buf[5] = 0;
+                buf[6] = 0;
+                buf[7] = 0;
+
+                memcpy(&buf[8], &xbox_authentication, 20);
+
+                buf[8] = MODE_PAGE_XBOX_AUTHENTICATION;
+                buf[9] = 28 - 10;
+
+                buf[10] = 0; // 0x00 = Video partition / 0x01 = Xbox partition //FIXME: Move to modepage
+                buf[11] = (s->ss) ? 1 : 0; // Unknown (if this is not 1, the Xbox will reject this game?!)
+                //buf[12] = 0; // Wether DVD is authenticated //FIXME: Move to modepage
+                buf[13] = (book_type << 4) | book_version; //FIXME: load info from SS or PFI?!
+
+                buf[14] = 0; // ?
+                //buf[15] = 0; // Challenge id
+                //cpu_to_ube32(&buf[16], 0); // Challenge value
+                *(uint32_t*)&buf[20] = 0x5FF7D443; // Response value
+                cpu_to_ube32(&buf[20], 0x5FF7D443);
+
+                buf[24] = 0; // Unknown
+                buf[25] = 0; // Unknown
+                buf[26] = 0; // Unknown
+                buf[27] = 0; // Unknown
+
+                ide_atapi_cmd_reply(s, 28, max_len);
+            }
+            break;
+#endif
         default:
             goto error_cmd;
         }
@@ -996,6 +1139,7 @@ static void cmd_read_dvd_structure(IDEState *s, uint8_t* buf)
 {
     int max_len;
     int media = buf[1];
+    int layer = buf[6];
     int format = buf[7];
     int ret;
 
@@ -1020,7 +1164,7 @@ static void cmd_read_dvd_structure(IDEState *s, uint8_t* buf)
         case 0x00 ... 0x7f:
         case 0xff:
             if (media == 0) {
-                ret = ide_dvd_read_structure(s, format, buf, buf);
+                ret = ide_dvd_read_structure(s, format, layer, buf, buf);
 
                 if (ret < 0) {
                     ide_atapi_cmd_error(s, ILLEGAL_REQUEST, -ret);
@@ -1082,6 +1226,7 @@ static const struct {
     [ 0x46 ] = { cmd_get_configuration,             ALLOW_UA },
     [ 0x4a ] = { cmd_get_event_status_notification, ALLOW_UA },
     [ 0x51 ] = { cmd_read_disc_information,         CHECK_READY },
+    [ 0x55 ] = { cmd_mode_select, /* (10) */        0 },
     [ 0x5a ] = { cmd_mode_sense, /* (10) */         0 },
     [ 0xa8 ] = { cmd_read, /* (12) */               CHECK_READY },
     [ 0xad ] = { cmd_read_dvd_structure,            CHECK_READY },

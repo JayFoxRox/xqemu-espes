@@ -1,5 +1,5 @@
-common-obj-$(CONFIG_IDE_CORE) += core.o atapi.o
-common-obj-$(CONFIG_IDE_QDEV) += qdev.o
+obj-$(CONFIG_IDE_CORE) += core.o atapi.o
+obj-$(CONFIG_IDE_QDEV) += qdev.o
 common-obj-$(CONFIG_IDE_PCI) += pci.o
 common-obj-$(CONFIG_IDE_ISA) += isa.o
 common-obj-$(CONFIG_IDE_PIIX) += piix.o
