@@ -32,6 +32,7 @@
 #include "sysemu/dma.h"
 #include "hw/block/block.h"
 #include "sysemu/blockdev.h"
+#include "block/block_int.h"
 
 #include <hw/ide/internal.h>
 
@@ -890,6 +891,79 @@ static void ide_cfata_metadata_write(IDEState *s)
                                     s->nsector << 9), 0x200 - 2));
 }
 
+/* Attempts to open a file related to another file and read it */
+static uint8_t *read_related(const char *file, const char *file_name, size_t size) {
+    FILE *f = NULL;
+    char *path = NULL;
+
+    /* Try suffix of the original file without ".iso" suffix */
+    if (f == NULL) {
+        unsigned int file_length = strlen(file);
+        if (file_length >= 4) {
+          char *suffix = &file[file_length - 4];
+          if (g_strcmp0(suffix, ".iso") == 0) {
+            char *tmp = g_strndup(file, file_length - 4);
+            path = g_strconcat(tmp, "-", file_name, NULL);
+            g_free(tmp);
+            f = fopen(path, "rb");
+          }
+        }
+    }
+
+    /* Try suffix of the original file */
+    if (f == NULL) {
+        path = g_strconcat(file, "-", file_name, NULL);
+        f = fopen(path, "rb");
+    }
+
+    /* Try default name in the path of the file */
+    if (f == NULL) {
+        char *tmp = g_path_get_dirname(path);
+        path = g_build_filename(tmp, file_name, NULL);
+        g_free(tmp);
+        f = fopen(path, "rb");
+    }
+
+    /* Fail */
+    if (f == NULL) {
+        printf("could not open %s for %s\n", file_name, file);
+        return NULL;
+    }
+
+    uint8_t *data = g_malloc(size);
+    size_t read_bytes = fread(data, 1, size, f);
+    fclose(f);
+    if (read_bytes != size) {
+        fprintf(stderr, "size of %s is bad, expected %d bytes, got %d\n", path, size, read_bytes);
+        g_free(data);
+        data = NULL;
+    }
+    g_free(path);
+    return data;
+}
+
+static void load_disc_information(IDEState *s, BlockDriverState *bs) {
+    if (bs != NULL) {
+        const char *file = s->bs->filename;
+        s->pfi = read_related(file, "PFI.bin", 2048);
+        s->dmi = read_related(file, "DMI.bin", 2048);
+        s->ss = read_related(file, "SS.bin", 2048);
+    } else {
+        if (s->pfi) {
+            g_free(s->pfi);
+            s->pfi = NULL;
+        }
+        if (s->dmi) {
+            g_free(s->dmi);
+            s->dmi = NULL;
+        }
+        if (s->ss) {
+            g_free(s->ss);
+            s->ss = NULL;
+        }
+    }
+}
+
 /* called when the inserted state of the media has changed */
 static void ide_cd_change_cb(void *opaque, bool load)
 {
@@ -899,6 +973,8 @@ static void ide_cd_change_cb(void *opaque, bool load)
     s->tray_open = !load;
     bdrv_get_geometry(s->bs, &nb_sectors);
     s->nb_sectors = nb_sectors;
+
+    load_disc_information(s, load ? s->bs : NULL);
 
     /*
      * First indicate to the guest that a CD has been removed.  That's
@@ -2171,6 +2247,10 @@ int ide_init_drive(IDEState *s, BlockDriverState *bs, IDEDriveKind kind,
         pstrcpy(s->version, sizeof(s->version), version);
     } else {
         pstrcpy(s->version, sizeof(s->version), qemu_get_version());
+    }
+
+    if (s->drive_kind == IDE_CD) {
+        load_disc_information(s, bs);
     }
 
     ide_reset(s);

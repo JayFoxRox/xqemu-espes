@@ -226,6 +226,9 @@
 #define MODE_PAGE_FAULT_FAIL                  0x1c
 #define MODE_PAGE_TO_PROTECT                  0x1d
 #define MODE_PAGE_CAPABILITIES                0x2a
+#ifdef TARGET_XBOX
+#define MODE_PAGE_XBOX_AUTHENTICATION         0x3e
+#endif
 #define MODE_PAGE_ALLS                        0x3f
 /* Not in Mt. Fuji, but in ATAPI 2.6 -- depricated now in favor
  * of MODE_PAGE_SENSE_POWER */

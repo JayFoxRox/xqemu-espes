@@ -25,6 +25,10 @@ typedef struct BlockConf {
     uint32_t discard_granularity;
     /* geometry, not all devices use this */
     uint32_t cyls, heads, secs;
+    /* Xbox specific */
+    const uint8_t* pfi;
+    const uint8_t* dmi;
+    const uint8_t* ss;
 } BlockConf;
 
 static inline unsigned int get_physical_block_exp(BlockConf *conf)
