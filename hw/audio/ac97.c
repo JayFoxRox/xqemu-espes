@@ -146,6 +146,7 @@ enum {
     BUP_LAST = 2
 };
 
+#define DEBUG_AC97
 #ifdef DEBUG_AC97
 #define dolog(...) AUD_log ("ac97", __VA_ARGS__)
 #else
@@ -818,8 +819,7 @@ static uint32_t nabm_readl (void *opaque, uint32_t addr)
  * Native audio bus master
  * I/O Writes
  */
-static void nabm_writeb (void *opaque, uint32_t addr, uint32_t val)
-{
+static bool nabm_try_writeb(void *opaque, uint32_t addr, uint32_t val) {
     AC97LinkState *s = opaque;
     AC97BusMasterRegs *r = NULL;
     uint32_t index = addr;
@@ -872,12 +872,13 @@ static void nabm_writeb (void *opaque, uint32_t addr, uint32_t val)
         dolog ("SR[%d] <- %#x (sr %#x)\n", GET_BM (index), val, r->sr);
         break;
     default:
-        dolog ("U nabm writeb %#x <- %#x\n", addr, val);
-        break;
+        return false;
     }
+    dolog ("S nabm writeb %#x <- %#x\n", addr, val);
+    return true;
 }
 
-static void nabm_writew (void *opaque, uint32_t addr, uint32_t val)
+static bool nabm_try_writew (void *opaque, uint32_t addr, uint32_t val)
 {
     AC97LinkState *s = opaque;
     AC97BusMasterRegs *r = NULL;
@@ -893,16 +894,18 @@ static void nabm_writew (void *opaque, uint32_t addr, uint32_t val)
         dolog ("SR[%d] <- %#x (sr %#x)\n", GET_BM (index), val, r->sr);
         break;
     default:
-        dolog ("U nabm writew %#x <- %#x\n", addr, val);
-        break;
+        return false;
     }
+    dolog ("S nabm writew %#x <- %#x\n", addr, val);
+    return true;
 }
 
-static void nabm_writel (void *opaque, uint32_t addr, uint32_t val)
+static bool nabm_try_writel (void *opaque, uint32_t addr, uint32_t val)
 {
     AC97LinkState *s = opaque;
     AC97BusMasterRegs *r = NULL;
     uint32_t index = addr;
+
     switch (index) {
     case PI_BDBAR:
     case PO_BDBAR:
@@ -928,9 +931,10 @@ static void nabm_writel (void *opaque, uint32_t addr, uint32_t val)
         dolog ("glob_sta <- %#x (glob_sta %#x)\n", val, s->glob_sta);
         break;
     default:
-        dolog ("U nabm writel %#x <- %#x\n", addr, val);
-        break;
+        return false;
     }
+    dolog ("S nabm writel %#x <- %#x\n", addr, val);
+    return true;
 }
 
 static int write_audio (AC97LinkState *s, AC97BusMasterRegs *r,
@@ -1109,14 +1113,17 @@ static void transfer_audio (AC97LinkState *s, int index, int elapsed)
                 new_sr |= SR_BCIS;
             }
 
+/* FIXME: Re-enable this somehow */
+
             if (r->civ == r->lvi) {
                 dolog ("Underrun civ (%d) == lvi (%d)\n", r->civ, r->lvi);
 
-                new_sr |= SR_LVBCI | SR_DCH | SR_CELV;
-                stop = 1;
-                s->bup_flag = (r->bd.ctl_len & BD_BUP) ? BUP_LAST : 0;
+                new_sr |= SR_LVBCI /*| SR_DCH*/ | SR_CELV;
+                //stop = 1;
+                //s->bup_flag = (r->bd.ctl_len & BD_BUP) ? BUP_LAST : 0;
             }
-            else {
+            
+            {
                 r->civ = r->piv;
                 r->piv = (r->piv + 1) % 32;
                 fetch_bd (s, r);
@@ -1238,16 +1245,23 @@ static void nabm_write(void *opaque, hwaddr addr, uint64_t val,
 {
     dolog("nabm_write [0x%llx] = 0x%llx (%d)\n", addr, val, size);
 
-    switch (size) {
-    case 1:
-        nabm_writeb(opaque, addr, val);
-        break;
-    case 2:
-        nabm_writew(opaque, addr, val);
-        break;
-    case 4:
-        nabm_writel(opaque, addr, val);
-        break;
+    while(size > 0) {
+      if ((size >= 4) && nabm_try_writel(opaque, addr, val)) {
+        size -= 4;
+        addr += 4;
+        val >>= 4 * 8;
+        continue;
+      }
+      if ((size >= 2) && nabm_try_writew(opaque, addr, val)) {
+        size -= 2;
+        addr += 2;
+        val >>= 2 * 8;
+        continue;
+      }
+      nabm_try_writeb(opaque, addr, val);
+      size -= 1;
+      addr += 1;
+      val >>= 1 * 8;
     }
 }
 
