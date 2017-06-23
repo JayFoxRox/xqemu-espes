@@ -343,11 +343,12 @@ static void fe_method(MCPXAPUState *d,
                 NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE,
                 selected_handle);
 
+        }
             voice_set_mask(d, selected_handle,
                     NV_PAVS_VOICE_PAR_STATE,
                     NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE,
                     1);
-        }
+        //}
         break;
     case NV1BA0_PIO_VOICE_OFF:
         voice_set_mask(d, argument,
@@ -461,7 +462,8 @@ static void scratch_rw(hwaddr sge_base, unsigned int max_sge,
         unsigned int entry = (addr + i) / TARGET_PAGE_SIZE;
         assert(entry < max_sge);
         uint32_t prd_address = ldl_le_phys(sge_base + entry*4*2);
-        uint32_t prd_control = ldl_le_phys(sge_base + entry*4*2 + 1);
+        uint32_t prd_control = ldl_le_phys(sge_base + entry*4*2 + 4);
+        //printf("Addr: 0x%08X, control: 0x%08X\n", prd_address, prd_control);
 
         hwaddr paddr = prd_address + (addr + i) % TARGET_PAGE_SIZE;
 
