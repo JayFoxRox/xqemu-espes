@@ -99,15 +99,32 @@ static const struct {
 #   define NV1BA0_PIO_VOICE_PAUSE_HANDLE                    0x0000FFFF
 #   define NV1BA0_PIO_VOICE_PAUSE_ACTION                    (1 << 18)
 #define NV1BA0_PIO_SET_CURRENT_VOICE                     0x000002F8
+#define NV1BA0_PIO_SET_VOICE_CFG_BUF_BASE                0x000003A0
+#   define NV1BA0_PIO_SET_VOICE_CFG_BUF_BASE_OFFSET         0x00FFFFFF
+#define NV1BA0_PIO_SET_VOICE_CFG_BUF_LBO                 0x000003A4
+#   define NV1BA0_PIO_SET_VOICE_CFG_BUF_LBO_OFFSET          0x00FFFFFF
+#define NV1BA0_PIO_SET_VOICE_BUF_CBO                     0x000003D8
+#   define NV1BA0_PIO_SET_VOICE_BUF_CBO_OFFSET              0x00FFFFFF
+#define NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO                 0x000003DC
+#   define NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO_OFFSET          0x00FFFFFF
 
 #define SE2FE_IDLE_VOICE                                 0x00008000
 
 
 /* voice structure */
 #define NV_PAVS_SIZE                                     0x00000080
+#define NV_PAVS_VOICE_CUR_PSL_START                      0x00000020
+#   define NV_PAVS_VOICE_CUR_PSL_START_BA                   0x00FFFFFF
+#define NV_PAVS_VOICE_CUR_PSH_SAMPLE                     0x00000024
+#   define NV_PAVS_VOICE_CUR_PSH_SAMPLE_LBO                 0x00FFFFFF
 #define NV_PAVS_VOICE_PAR_STATE                          0x00000054
 #   define NV_PAVS_VOICE_PAR_STATE_PAUSED                   (1 << 18)
 #   define NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE             (1 << 21)
+#define NV_PAVS_VOICE_PAR_OFFSET                         0x00000058
+#   define NV_PAVS_VOICE_PAR_OFFSET_CBO                     0x00FFFFFF
+#define NV_PAVS_VOICE_PAR_NEXT                           0x0000005C
+#   define NV_PAVS_VOICE_PAR_NEXT_EBO                       0x00FFFFFF
+
 #define NV_PAVS_VOICE_TAR_PITCH_LINK                     0x0000007c
 #   define NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE   0x0000FFFF
 
@@ -340,6 +357,30 @@ static void fe_method(MCPXAPUState *d,
     case NV1BA0_PIO_SET_CURRENT_VOICE:
         d->regs[NV_PAPU_FECV] = argument;
         break;
+    case NV1BA0_PIO_SET_VOICE_CFG_BUF_BASE:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV],
+                NV_PAVS_VOICE_CUR_PSL_START,
+                NV_PAVS_VOICE_CUR_PSL_START_BA,
+                argument);
+        break;
+    case NV1BA0_PIO_SET_VOICE_CFG_BUF_LBO:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV],
+                NV_PAVS_VOICE_CUR_PSH_SAMPLE,
+                NV_PAVS_VOICE_CUR_PSH_SAMPLE_LBO,
+                argument);
+        break;
+    case NV1BA0_PIO_SET_VOICE_BUF_CBO:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV],
+                NV_PAVS_VOICE_PAR_OFFSET,
+                NV_PAVS_VOICE_PAR_OFFSET_CBO,
+                argument);
+        break;
+    case NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV],
+                NV_PAVS_VOICE_PAR_NEXT,
+                NV_PAVS_VOICE_PAR_NEXT_EBO,
+                argument);
+        break;
     case SE2FE_IDLE_VOICE:
         if (d->regs[NV_PAPU_FETFORCE1] & NV_PAPU_FETFORCE1_SE2FE_IDLE_VOICE) {
             
@@ -389,6 +430,10 @@ static void vp_write(void *opaque, hwaddr addr,
     case NV1BA0_PIO_VOICE_OFF:
     case NV1BA0_PIO_VOICE_PAUSE:
     case NV1BA0_PIO_SET_CURRENT_VOICE:
+    case NV1BA0_PIO_SET_VOICE_CFG_BUF_BASE:
+    case NV1BA0_PIO_SET_VOICE_CFG_BUF_LBO:
+    case NV1BA0_PIO_SET_VOICE_BUF_CBO:
+    case NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO:
         /* TODO: these should instead be queueing up fe commands */
         fe_method(d, addr, val);
         break;
