@@ -146,7 +146,7 @@ enum {
     BUP_LAST = 2
 };
 
-#define DEBUG_AC97
+//#define DEBUG_AC97
 #ifdef DEBUG_AC97
 #define dolog(...) AUD_log ("ac97", __VA_ARGS__)
 #else
