@@ -207,6 +207,7 @@ static void voice_set_mask(MCPXAPUState *d,
     assert(voice_handle < 0xFFFF);
     hwaddr voice = d->regs[NV_PAPU_VPVADDR]
                     + voice_handle * NV_PAVS_SIZE;
+    printf("\n\n\n\nWriting data in voice %d\n\n\n\n\n", voice_handle);
     uint32_t v = ldl_le_phys(voice + offset) & ~mask;
     stl_le_phys(voice + offset,
                 v | ((val << (ffs(mask)-1)) & mask));
@@ -282,6 +283,9 @@ static void mcpx_apu_write(void *opaque, hwaddr addr,
         break;
     default:
         if (addr < 0x20000) {
+            if (addr == NV_PAPU_TVL2D) {
+              printf("\n\n\n\nCrushing TV2LD voice top with 0x%08X\n\n\n\n", val);
+            }
             d->regs[addr] = val;
         }
         break;
@@ -306,10 +310,12 @@ static void fe_method(MCPXAPUState *d,
     switch (method) {
     case NV1BA0_PIO_SET_ANTECEDENT_VOICE:
         d->regs[NV_PAPU_FEAV] = argument;
+        printf("\n\n\n\n\n\nSetting voice: 0x%08X\n\n\n\n\n\n\n", argument);
         break;
     case NV1BA0_PIO_VOICE_ON:
         selected_handle = argument & NV1BA0_PIO_VOICE_ON_HANDLE;
         list = GET_MASK(d->regs[NV_PAPU_FEAV], NV_PAPU_FEAV_LST);
+        printf("\n\n\n\nActivating voice %d\n\n\n\n", selected_handle);
         if (list != NV1BA0_PIO_SET_ANTECEDENT_VOICE_LIST_INHERIT) {
             /* voice is added to the top of the selected list */
             unsigned int top_reg = voice_list_regs[list-1].top;
@@ -318,6 +324,7 @@ static void fe_method(MCPXAPUState *d,
                 NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE,
                 d->regs[top_reg]);
             d->regs[top_reg] = selected_handle;
+            printf("\n\nSetting top 0x%04X\n\n\n", selected_handle);
         } else {
             unsigned int antecedent_voice =
                 GET_MASK(d->regs[NV_PAPU_FEAV], NV_PAPU_FEAV_VALUE);
