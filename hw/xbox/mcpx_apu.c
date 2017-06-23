@@ -49,6 +49,7 @@
 #       define NV_PAPU_SECTL_XCNTMODE_OFF                       0
 #define NV_PAPU_XGSCNT                                   0x0000200C
 #define NV_PAPU_VPVADDR                                  0x0000202C
+#define NV_PAPU_VPSGEADDR                                0x00002030
 #define NV_PAPU_GPSADDR                                  0x00002040
 #define NV_PAPU_EPSADDR                                  0x00002048
 #define NV_PAPU_TVL2D                                    0x00002054
@@ -107,6 +108,10 @@ static const struct {
 #   define NV1BA0_PIO_SET_VOICE_BUF_CBO_OFFSET              0x00FFFFFF
 #define NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO                 0x000003DC
 #   define NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO_OFFSET          0x00FFFFFF
+#define NV1BA0_PIO_SET_CURRENT_INBUF_SGE                 0x00000804
+#   define NV1BA0_PIO_SET_CURRENT_INBUF_SGE_HANDLE          0xFFFFFFFF
+#define NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET          0x00000808
+#   define NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET_PARAMETER 0xFFFFF000
 
 #define SE2FE_IDLE_VOICE                                 0x00008000
 
@@ -180,6 +185,7 @@ typedef struct MCPXAPUState {
         uint32_t regs[0x10000];
     } ep;
 
+    uint32_t inbuf_sge_handle; //FIXME: Where is this stored?
     uint32_t regs[0x20000];
 
 } MCPXAPUState;
@@ -389,6 +395,17 @@ static void fe_method(MCPXAPUState *d,
                 NV_PAVS_VOICE_PAR_NEXT_EBO,
                 argument);
         break;
+
+    case NV1BA0_PIO_SET_CURRENT_INBUF_SGE:
+        d->inbuf_sge_handle = argument & NV1BA0_PIO_SET_CURRENT_INBUF_SGE_HANDLE;
+        break;
+    case NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET: {
+        //FIXME: Is there an upper limit for the SGE table size?
+        hwaddr sge_address = d->regs[NV_PAPU_VPSGEADDR] + d->inbuf_sge_handle * 8;
+        stl_le_phys(sge_address, argument & NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET_PARAMETER);
+        printf("Wrote SGE[0x%X] = 0x%08X\n", d->inbuf_sge_handle, argument & NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET_PARAMETER);
+        break;
+    }
     case SE2FE_IDLE_VOICE:
         if (d->regs[NV_PAPU_FETFORCE1] & NV_PAPU_FETFORCE1_SE2FE_IDLE_VOICE) {
             
@@ -442,6 +459,8 @@ static void vp_write(void *opaque, hwaddr addr,
     case NV1BA0_PIO_SET_VOICE_CFG_BUF_LBO:
     case NV1BA0_PIO_SET_VOICE_BUF_CBO:
     case NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO:
+    case NV1BA0_PIO_SET_CURRENT_INBUF_SGE:
+    case NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET:
         /* TODO: these should instead be queueing up fe commands */
         fe_method(d, addr, val);
         break;
