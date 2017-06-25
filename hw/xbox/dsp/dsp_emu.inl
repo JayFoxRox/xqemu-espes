@@ -6823,9 +6823,9 @@ static void emu_inc(dsp_core_t* dsp)
         dest[2] = dsp->registers[DSP_REG_B0];
     }
 
-    source[2] = 0;
+    source[2] = 1;
     source[1] = 0;
-    source[0] = 1;
+    source[0] = 0;
 
     dsp_add56(source, dest);
 
