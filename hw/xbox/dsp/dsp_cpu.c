@@ -282,7 +282,7 @@ static const OpcodeEntry nonparallel_opcodes[] = {
     { "0000101111DDDDDD001bbbbb", "jsset #n, S, xxxx", dis_jsset_reg, emu_jsset_reg },
     { "0000010011000RRR000ddddd", "lra Rn, D", NULL, NULL },
     { "0000010001000000010ddddd", "lra xxxx, D", NULL, NULL },
-    { "000011000001111010iiiiiD", "lsl #ii, D", NULL, NULL },
+    { "000011000001111010iiiiiD", "lsl #ii, D", NULL, emu_lsl_imm },
     { "00001100000111100001sssD", "lsl S, D", NULL, NULL },
     { "000011000001111011iiiiiD", "lsr #ii, D", NULL, NULL },
     { "00001100000111100011sssD", "lsr S, D", NULL, NULL },

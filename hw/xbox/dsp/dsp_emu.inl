@@ -7325,6 +7325,29 @@ static void emu_jsset_reg(dsp_core_t* dsp)
     ++dsp->cur_inst_len;
 }
 
+static void emu_lsl_imm(dsp_core_t* dsp)
+{
+    uint32_t D = dsp->cur_inst & 1;
+    uint32_t ii = (dsp->cur_inst >> 1) & BITMASK(5);
+
+    int dstreg;
+    if (D) {
+        dstreg = DSP_REG_B1;
+    } else {
+        dstreg = DSP_REG_A1;
+    }
+
+    uint32_t newcarry = (dsp->registers[dstreg]>>(24 - ii)) & 1;
+
+    dsp->registers[dstreg] <<= ii;
+    dsp->registers[dstreg] &= BITMASK(24);
+
+    dsp->registers[DSP_REG_SR] &= BITMASK(16)-((1<<DSP_SR_C)|(1<<DSP_SR_N)|(1<<DSP_SR_Z)|(1<<DSP_SR_V));
+    dsp->registers[DSP_REG_SR] |= newcarry;
+    dsp->registers[DSP_REG_SR] |= ((dsp->registers[dstreg]>>23) & 1)<<DSP_SR_N;
+    dsp->registers[DSP_REG_SR] |= (dsp->registers[dstreg]==0)<<DSP_SR_Z;
+}
+
 static void emu_lua(dsp_core_t* dsp)
 {
     uint32_t value, srcreg, dstreg, srcsave, srcnew;
