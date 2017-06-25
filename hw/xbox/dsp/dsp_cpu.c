@@ -1249,7 +1249,7 @@ static uint16_t dsp_asl56(uint32_t *dest, int n)
     return (overflow<<DSP_SR_L)|(v<<DSP_SR_V)|(carry<<DSP_SR_C);
 }
 
-static uint16_t dsp_asr56(uint32_t *dest, int n)
+static uint16_t dsp_lsr56(uint32_t *dest, int n)
 {
     /* Shift right dest n bits: D>>=n */
 
@@ -1263,6 +1263,24 @@ static uint16_t dsp_asr56(uint32_t *dest, int n)
     dest[0] = (dest_v >> 48) & BITMASK(8);
 
     return (carry<<DSP_SR_C);
+}
+
+static uint16_t dsp_asr56(uint32_t *dest, int n)
+{
+    /* Shift right dest n bits: D>>=n, fill MSB with previous MSB */
+
+    uint64_t dest_v = dest[2] | ((uint64_t)dest[1] << 24) | ((uint64_t)dest[0] << 48);
+    uint64_t msb_v = ((dest_v >> 55) & 1) ? (BITMASK(n) << (56 - n)) : 0;
+
+    uint16_t carry = (dest_v >> (n-1)) & 1;
+    
+    dest_v >>= n;
+    dest_v |= msb_v;
+    dest[2] = dest_v & BITMASK(24);
+    dest[1] = (dest_v >> 24) & BITMASK(24);
+    dest[0] = (dest_v >> 48) & BITMASK(8);
+
+    return (carry<<DSP_SR_C); 
 }
 
 static uint16_t dsp_add56(uint32_t *source, uint32_t *dest)
