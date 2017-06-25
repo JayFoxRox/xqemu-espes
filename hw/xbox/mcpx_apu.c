@@ -116,6 +116,14 @@ static const struct {
 #   define NV1BA0_PIO_SET_CURRENT_INBUF_SGE_HANDLE          0xFFFFFFFF
 #define NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET          0x00000808
 #   define NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET_PARAMETER 0xFFFFF000
+#define NV1BA0_PIO_SET_OUTBUF_BA                         0x00001000 // 8 byte pitch, 4 entries
+#   define NV1BA0_PIO_SET_OUTBUF_BA_ADDRESS                  0x007FFF00
+#define NV1BA0_PIO_SET_OUTBUF_LEN                        0x00001004 // 8 byte pitch, 4 entries
+#   define NV1BA0_PIO_SET_OUTBUF_LEN_VALUE                   0x007FFF00
+#define NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE                0x00001800
+#   define NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_HANDLE          0xFFFFFFFF
+#define NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET         0x00001808
+#   define NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET_PARAMETER 0xFFFFF000
 
 #define SE2FE_IDLE_VOICE                                 0x00008000
 
@@ -153,6 +161,11 @@ static const struct {
         (v) |= ((val) << (ffs(mask)-1)) & (mask);                    \
     } while (0)
 
+#define CASE_4(v, step)                                              \
+    case (v):                                                        \
+    case (v)+(step):                                                 \
+    case (v)+(step)*2:                                               \
+    case (v)+(step)*3
 
 
 // #define MCPX_DEBUG
@@ -193,6 +206,7 @@ typedef struct MCPXAPUState {
     } ep;
 
     uint32_t inbuf_sge_handle; //FIXME: Where is this stored?
+    uint32_t outbuf_sge_handle; //FIXME: Where is this stored?
     uint32_t regs[0x20000];
 
 } MCPXAPUState;
@@ -313,6 +327,9 @@ static const MemoryRegionOps mcpx_apu_mmio_ops = {
 static void fe_method(MCPXAPUState *d,
                       uint32_t method, uint32_t argument)
 {
+
+    unsigned int slot;
+
     MCPX_DPRINTF("mcpx fe_method 0x%x 0x%x\n", method, argument);
 
     //assert((d->regs[NV_PAPU_FECTL] & NV_PAPU_FECTL_FEMETHMODE) == 0);
@@ -420,15 +437,41 @@ static void fe_method(MCPXAPUState *d,
                 NV_PAVS_VOICE_PAR_NEXT_EBO,
                 argument);
         break;
-
     case NV1BA0_PIO_SET_CURRENT_INBUF_SGE:
         d->inbuf_sge_handle = argument & NV1BA0_PIO_SET_CURRENT_INBUF_SGE_HANDLE;
         break;
     case NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET: {
         //FIXME: Is there an upper limit for the SGE table size?
+        //FIXME: NV_PAPU_VPSGEADDR is probably bad, as outbuf SGE use the same handle range (or that is also wrong)
         hwaddr sge_address = d->regs[NV_PAPU_VPSGEADDR] + d->inbuf_sge_handle * 8;
         stl_le_phys(sge_address, argument & NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET_PARAMETER);
-        printf("Wrote SGE[0x%X] = 0x%08X\n", d->inbuf_sge_handle, argument & NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET_PARAMETER);
+        printf("Wrote inbuf SGE[0x%X] = 0x%08X\n", d->inbuf_sge_handle, argument & NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET_PARAMETER);
+        break;
+    }
+    CASE_4(NV1BA0_PIO_SET_OUTBUF_BA, 8): // 8 byte pitch, 4 entries
+        slot = (method - NV1BA0_PIO_SET_OUTBUF_BA) / 8;
+        //FIXME: Use NV1BA0_PIO_SET_OUTBUF_BA_ADDRESS = 0x007FFF00 ?
+        printf("outbuf_ba[%d]: 0x%08X\n", slot, argument);
+        //assert(false); //FIXME: Enable assert! no idea what this reg does
+        break;
+    CASE_4(NV1BA0_PIO_SET_OUTBUF_LEN, 8): // 8 byte pitch, 4 entries
+        slot = (method - NV1BA0_PIO_SET_OUTBUF_LEN) / 8;
+        //FIXME: Use NV1BA0_PIO_SET_OUTBUF_LEN_VALUE = 0x007FFF00 ?
+        printf("outbuf_len[%d]: 0x%08X\n", slot, argument);
+        //assert(false); //FIXME: Enable assert! no idea what this reg does
+        break;
+    case NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE:
+        d->outbuf_sge_handle = argument & NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_HANDLE;
+        break;
+    case NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET: {
+        //FIXME: Is there an upper limit for the SGE table size?
+        //FIXME: NV_PAPU_VPSGEADDR is probably bad, as inbuf SGE use the same handle range (or that is also wrong)
+        // NV_PAPU_EPFADDR   EP outbufs
+        // NV_PAPU_GPFADDR   GP outbufs
+        // But how does it know which outbuf is being written?!
+        hwaddr sge_address = d->regs[NV_PAPU_VPSGEADDR] + d->outbuf_sge_handle * 8;
+        stl_le_phys(sge_address, argument & NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET_PARAMETER);
+        printf("Wrote outbuf SGE[0x%X] = 0x%08X\n", d->outbuf_sge_handle, argument & NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET_PARAMETER);
         break;
     }
     case SE2FE_IDLE_VOICE:
@@ -489,6 +532,10 @@ static void vp_write(void *opaque, hwaddr addr,
     case NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO:
     case NV1BA0_PIO_SET_CURRENT_INBUF_SGE:
     case NV1BA0_PIO_SET_CURRENT_INBUF_SGE_OFFSET:
+    CASE_4(NV1BA0_PIO_SET_OUTBUF_BA, 8): // 8 byte pitch, 4 entries
+    CASE_4(NV1BA0_PIO_SET_OUTBUF_LEN, 8): // 8 byte pitch, 4 entries
+    case NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE:
+    case NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET:
         /* TODO: these should instead be queueing up fe commands */
         fe_method(d, addr, val);
         break;
