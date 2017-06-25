@@ -547,7 +547,7 @@ static void scratch_rw(hwaddr sge_base, unsigned int max_sge,
     int i;
     for (i=0; i<len; i++) {
         unsigned int entry = (addr + i) / TARGET_PAGE_SIZE;
-        assert(entry < max_sge);
+        assert(entry <= max_sge);
         uint32_t prd_address = ldl_le_phys(sge_base + entry*4*2);
         uint32_t prd_control = ldl_le_phys(sge_base + entry*4*2 + 4);
         //printf("Addr: 0x%08X, control: 0x%08X\n", prd_address, prd_control);
