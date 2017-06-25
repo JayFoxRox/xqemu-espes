@@ -659,15 +659,18 @@ static void ep_write(void *opaque, hwaddr addr,
 
     switch (addr) {
     case NV_PAPU_EPXMEM ... NV_PAPU_EPXMEM + 0xC00*4: {
-        assert(false);
+        uint32_t xaddr = (addr - NV_PAPU_EPXMEM) / 4;
+        dsp_write_memory(d->ep.dsp, 'X', xaddr, val);
         break;
     }
     case NV_PAPU_EPYMEM ... NV_PAPU_EPYMEM + 0x100*4: {
-        assert(false);
+        uint32_t yaddr = (addr - NV_PAPU_EPYMEM) / 4;
+        dsp_write_memory(d->ep.dsp, 'Y', yaddr, val);
         break;
     }
     case NV_PAPU_EPPMEM ... NV_PAPU_EPPMEM + 0x1000*4: {
-        assert(false);
+        uint32_t paddr = (addr - NV_PAPU_EPPMEM) / 4;
+        dsp_write_memory(d->ep.dsp, 'P', paddr, val);
         break;
     }
     case NV_PAPU_EPRST:

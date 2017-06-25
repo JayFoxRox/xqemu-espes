@@ -218,6 +218,27 @@ uint32_t dsp_read_memory(DSPState* dsp, char space_id, uint32_t address)
     return dsp56k_read_memory(&dsp->core, space, address);
 }
 
+void dsp_write_memory(DSPState* dsp, char space_id, uint32_t address, uint32_t value)
+{
+    int space;
+
+    switch (space_id) {
+    case 'X':
+        space = DSP_SPACE_X;
+        break;
+    case 'Y':
+        space = DSP_SPACE_Y;
+        break;
+    case 'P':
+        space = DSP_SPACE_P;
+        break;
+    default:
+        assert(false);
+    }
+
+    dsp56k_write_memory(&dsp->core, space, address, value);
+}
+
 
 /**
  * Output memory values between given addresses in given DSP address space.
