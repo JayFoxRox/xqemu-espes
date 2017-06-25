@@ -687,7 +687,8 @@ static void se_frame(void *opaque)
         dsp_start_frame(d->ep.dsp);
 
         // hax
-        // dsp_run(d->ep.dsp, 1000);
+        printf("Running EP code\n");
+        dsp_run(d->ep.dsp, 1000);
     }
 }
 
