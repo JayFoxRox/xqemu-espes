@@ -598,18 +598,22 @@ static const MemoryRegionOps vp_ops = {
     .write = vp_write,
 };
 
+static hwaddr get_data_ptr(hwaddr sge_base, unsigned int max_sge, uint32_t addr) {
+    unsigned int entry = addr / TARGET_PAGE_SIZE;
+    assert(entry <= max_sge);
+    uint32_t prd_address = ldl_le_phys(sge_base + entry*4*2);
+    uint32_t prd_control = ldl_le_phys(sge_base + entry*4*2 + 4);
+    //printf("Addr: 0x%08X, control: 0x%08X\n", prd_address, prd_control);
+
+    return prd_address + addr % TARGET_PAGE_SIZE;
+}
+
 static void scratch_rw(hwaddr sge_base, unsigned int max_sge,
                        uint8_t* ptr, uint32_t addr, size_t len, bool dir)
 {
     int i;
     for (i=0; i<len; i++) {
-        unsigned int entry = (addr + i) / TARGET_PAGE_SIZE;
-        assert(entry <= max_sge);
-        uint32_t prd_address = ldl_le_phys(sge_base + entry*4*2);
-        uint32_t prd_control = ldl_le_phys(sge_base + entry*4*2 + 4);
-        //printf("Addr: 0x%08X, control: 0x%08X\n", prd_address, prd_control);
-
-        hwaddr paddr = prd_address + (addr + i) % TARGET_PAGE_SIZE;
+        hwaddr paddr = get_data_ptr(sge_base, max_sge, addr + i);
 
         if (dir) {
             stb_phys(paddr, ptr[i]);
@@ -628,16 +632,7 @@ offset %= 0x2000;
 addr += offset;
     int i;
     for (i=0; i<len; i++) {
-        if (i % 2 == 0) {
-          printf("Addr: 0x%X = %d\n", addr+i, *(int16_t*)&ptr[i]);
-        }
-        unsigned int entry = (addr + i) / TARGET_PAGE_SIZE;
-        assert(entry <= max_sge);
-        uint32_t prd_address = ldl_le_phys(sge_base + entry*4*2);
-        uint32_t prd_control = ldl_le_phys(sge_base + entry*4*2 + 4);
-        //printf("Addr: 0x%08X, control: 0x%08X\n", prd_address, prd_control);
-
-        hwaddr paddr = prd_address + (addr + i) % TARGET_PAGE_SIZE;
+        hwaddr paddr = get_data_ptr(sge_base, max_sge, addr + i);
 
         if (dir) {
             stb_phys(paddr, ptr[i]);
