@@ -107,12 +107,6 @@ static void dsp_dma_run(DSPDMAState *s)
             s->eol = true;
         }
 
-
-        DPRINTF("\n\n\nDMA addr %x, control %x, count %x, "
-                 "dsp_offset %x, scratch_offset %x, base %x, size %x\n\n\n",
-                addr, control, count, dsp_offset,
-                scratch_offset, scratch_base, scratch_size);
-
         uint32_t format = (control >> 10) & 7;
         unsigned int item_size;
         uint32_t item_mask = 0xffffffff;
@@ -148,6 +142,13 @@ static void dsp_dma_run(DSPDMAState *s)
             // assert(buf_id == 0xf) // 'offset'
             scratch_addr = scratch_offset;
         }
+
+        DPRINTF("[P:0x%06X] DMA [%s] desc 0x%X, ctrl 0x%X, buf 0x%X, cnt 0x%X (x %u B = %u B), "
+                 "dsp 0x%X, S base 0x%X (+ offset 0x%x size 0x%X = 0x%zX)\n",
+                s->core->pc,
+                (control & NODE_CONTROL_DIRECTION) ? "DSP -> S" : "S -> DSP",
+                addr, control, buf_id, count, item_size, count * item_size, dsp_offset,
+                scratch_base, scratch_offset, scratch_size, scratch_addr);
 
         uint8_t* scratch_buf = calloc(count, item_size);
 
