@@ -51,7 +51,9 @@
 #define NV_PAPU_VPVADDR                                  0x0000202C
 #define NV_PAPU_VPSGEADDR                                0x00002030
 #define NV_PAPU_GPSADDR                                  0x00002040
+#define NV_PAPU_GPFADDR                                  0x00002044
 #define NV_PAPU_EPSADDR                                  0x00002048
+#define NV_PAPU_EPFADDR                                  0x0000204C
 #define NV_PAPU_TVL2D                                    0x00002054
 #define NV_PAPU_CVL2D                                    0x00002058
 #define NV_PAPU_NVL2D                                    0x0000205C
@@ -62,7 +64,9 @@
 #define NV_PAPU_CVLMP                                    0x00002070
 #define NV_PAPU_NVLMP                                    0x00002074
 #define NV_PAPU_GPSMAXSGE                                0x000020D4
+#define NV_PAPU_GPFMAXSGE                                0x000020D8
 #define NV_PAPU_EPSMAXSGE                                0x000020DC
+#define NV_PAPU_EPFMAXSGE                                0x000020E0
 
 #define NV_PAPU_GPXMEM                                   0x00000000
 #define NV_PAPU_GPMIXBUF                                 0x00005000
@@ -592,6 +596,37 @@ static void scratch_rw(hwaddr sge_base, unsigned int max_sge,
     }
 }
 
+static void fifo_rw(hwaddr sge_base, unsigned int max_sge, unsigned int idx,
+                    uint8_t* ptr, uint32_t addr, size_t len, bool dir)
+{
+    //FIXME: Get FIFO BASE, get FIFO CUR, get FIFO END
+static int offset = 0;
+offset %= 0x2000;
+addr += offset;
+    int i;
+    for (i=0; i<len; i++) {
+        if (i % 2 == 0) {
+          printf("Addr: 0x%X = %d\n", addr+i, *(int16_t*)&ptr[i]);
+        }
+        unsigned int entry = (addr + i) / TARGET_PAGE_SIZE;
+        assert(entry <= max_sge);
+        uint32_t prd_address = ldl_le_phys(sge_base + entry*4*2);
+        uint32_t prd_control = ldl_le_phys(sge_base + entry*4*2 + 4);
+        //printf("Addr: 0x%08X, control: 0x%08X\n", prd_address, prd_control);
+
+        hwaddr paddr = prd_address + (addr + i) % TARGET_PAGE_SIZE;
+
+        if (dir) {
+            stb_phys(paddr, ptr[i]);
+        } else {
+            ptr[i] = ldub_phys(paddr);
+        }
+    }
+offset += len;
+    // FIXME: Fixup FIFO CUR
+
+}
+
 static void gp_scratch_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len, bool dir)
 {
     MCPXAPUState *d = opaque;
@@ -599,15 +634,11 @@ static void gp_scratch_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len,
                ptr, addr, len, dir);
 }
 
-static void gp_mixbuf_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len, bool dir)
+static void gp_fifo_rw(void *opaque, unsigned int idx, uint8_t* ptr, uint32_t addr, size_t len, bool dir)
 {
     MCPXAPUState *d = opaque;
-    uint8_t* mixbuf = (uint8_t*)&d->regs[NV_PAPU_GPMIXBUF];
-    if (dir) {
-      memcpy(&mixbuf[addr], ptr, len);
-    } else {
-      memcpy(ptr, &mixbuf[addr], len);
-    }
+    fifo_rw(d->regs[NV_PAPU_GPFADDR], d->regs[NV_PAPU_GPFMAXSGE], idx,
+            ptr, addr, len, dir);
 }
 
 static void ep_scratch_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len, bool dir)
@@ -615,6 +646,13 @@ static void ep_scratch_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len,
     MCPXAPUState *d = opaque;
     scratch_rw(d->regs[NV_PAPU_EPSADDR], d->regs[NV_PAPU_EPSMAXSGE],
                ptr, addr, len, dir);
+}
+
+static void ep_fifo_rw(void *opaque, unsigned int idx, uint8_t* ptr, uint32_t addr, size_t len, bool dir)
+{
+    MCPXAPUState *d = opaque;
+    fifo_rw(d->regs[NV_PAPU_EPFADDR], d->regs[NV_PAPU_EPFMAXSGE], idx,
+            ptr, addr, len, dir);
 }
 
 static void proc_rst_write(DSPState *dsp, uint32_t oldval, uint32_t val)
@@ -842,8 +880,8 @@ static int mcpx_apu_initfn(PCIDevice *dev)
 
     d->se.frame_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, se_frame, d);
 
-    d->gp.dsp = dsp_init(d, gp_scratch_rw, gp_mixbuf_rw);
-    d->ep.dsp = dsp_init(d, ep_scratch_rw, NULL);
+    d->gp.dsp = dsp_init(d, gp_scratch_rw, gp_fifo_rw);
+    d->ep.dsp = dsp_init(d, ep_scratch_rw, ep_fifo_rw);
 
     return 0;
 }

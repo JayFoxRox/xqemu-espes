@@ -31,11 +31,13 @@
 
 typedef struct DSPState DSPState;
 
-typedef void (*dsp_rw_func)(
+typedef void (*dsp_scratch_rw_func)(
     void* opaque, uint8_t* ptr, uint32_t addr, size_t len, bool dir);
+typedef void (*dsp_fifo_rw_func)(
+    void* opaque, unsigned int idx, uint8_t* ptr, uint32_t addr, size_t len, bool dir);
 
 /* Dsp commands */
-DSPState* dsp_init(void* rw_opaque, dsp_rw_func scratch_rw, dsp_rw_func mixbuf_rw);
+DSPState* dsp_init(void* rw_opaque, dsp_scratch_rw_func scratch_rw, dsp_fifo_rw_func fifo_rw);
 void dsp_destroy(DSPState* dsp);
 void dsp_reset(DSPState* dsp);
 

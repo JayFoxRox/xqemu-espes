@@ -128,7 +128,9 @@ static void dsp_dma_run(DSPDMAState *s)
         uint32_t buf_id = (control >> 5) & 0xf;
 
         size_t scratch_addr;
-        if (buf_id == 0xe) { // 'circular'?
+        if ((buf_id == 0x0) || (buf_id == 0x1)) { // 'fifo'
+            scratch_addr = 0;
+        } else if (buf_id == 0xe) { // 'circular'?
             // assert(scratch_offset == 0);
             // assert(scratch_offset + count * item_size < scratch_size);
             if (scratch_offset + count * item_size >= scratch_size) {
@@ -150,6 +152,11 @@ static void dsp_dma_run(DSPDMAState *s)
                 addr, control, buf_id, count, item_size, count * item_size, dsp_offset,
                 scratch_base, scratch_offset, scratch_size, scratch_addr);
 
+        if ((buf_id == 0x0) || (buf_id == 0x1)) {
+          // FIXME: Why is this different from other commands? maybe another bit in control?
+          count = ((count >> 4) & 0xFFFFF) * (count & 0xF);
+        }
+
         uint8_t* scratch_buf = calloc(count, item_size);
 
         if (control & NODE_CONTROL_DIRECTION) {
@@ -169,13 +176,23 @@ static void dsp_dma_run(DSPDMAState *s)
                 }
             }
 
-            // write to scratch memory
-            s->scratch_rw(s->rw_opaque,
-                scratch_buf, scratch_addr, count*item_size, 1);
+            // write to system memory
+            if ((buf_id == 0x0) || (buf_id == 0x1)) {
+              s->fifo_rw(s->rw_opaque, buf_id,
+                  scratch_buf, scratch_addr, count*item_size, 1);
+            } else {
+              s->scratch_rw(s->rw_opaque,
+                  scratch_buf, scratch_addr, count*item_size, 1);
+            }
         } else {
-            // read from scratch memory
-            s->scratch_rw(s->rw_opaque,
-                scratch_buf, scratch_addr, count*item_size, 0);
+            // read from system memory
+            if ((buf_id == 0x0) || (buf_id == 0x1)) {
+              s->fifo_rw(s->rw_opaque, buf_id,
+                  scratch_buf, scratch_addr, count*item_size, 1);
+            } else {
+              s->scratch_rw(s->rw_opaque,
+                  scratch_buf, scratch_addr, count*item_size, 0);
+            }
 
             int i;
             for (i=0; i<count; i++) {
