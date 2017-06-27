@@ -1107,23 +1107,14 @@ skipvoice:; // FIXME: Remove.. hack!
     static void* vp_wav_out = NULL;
     if (vp_wav_out == NULL) {
         vp_wav_out = g_malloc0(sizeof(WAVOutState));
-        wav_out_init(vp_wav_out, "vp-out.wav", 48000, 24, 2);
+        wav_out_init(vp_wav_out, "vp-out.wav", 48000, 24, 32);
     }
     for(unsigned int i = 0; i < 0x20; i++) {
-        // Map channels from DirectSound -> WAV
-        uint32_t sample_0 = mixbuf[0][i] & 0xFFFFFF;
-        sample_0 *= 0x80;
-        uint32_t sample_2 = mixbuf[1][i] & 0xFFFFFF;
-        sample_2 *= 0x80;
-        //printf("Sample: %d %d\n", sample_0, sample_2);
-        wav_out_write(vp_wav_out, &sample_0, 3); // Front left
-        wav_out_write(vp_wav_out, &sample_2, 3); // Front right
-/*
-        wav_writer(mixbuf[1][i] & 0xFFFFFF); // Center
-        wav_writer(mixbuf[5][i] & 0xFFFFFF); // LFE
-        wav_writer(mixbuf[3][i] & 0xFFFFFF); // Rear left
-        wav_writer(mixbuf[4][i] & 0xFFFFFF); // Rear right
-*/
+        for(unsigned int j = 0; j < 32; j++) {
+            uint32_t sample = mixbuf[j][i] & 0xFFFFFF;
+            sample *= 0x80;
+            wav_out_write(vp_wav_out, &sample, 3); 
+        }
     }
     wav_out_update(vp_wav_out);
 #endif
