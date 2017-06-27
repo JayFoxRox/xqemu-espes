@@ -144,7 +144,15 @@ static const struct {
 /* voice structure */
 #define NV_PAVS_SIZE                                     0x00000080
 #define NV_PAVS_VOICE_CFG_VBIN                           0x00000000
+#   define NV_PAVS_VOICE_CFG_VBIN_V0BIN                     (0x1F << 0)
+#   define NV_PAVS_VOICE_CFG_VBIN_V1BIN                     (0x1F << 5)
+#   define NV_PAVS_VOICE_CFG_VBIN_V2BIN                     (0x1F << 10)
+#   define NV_PAVS_VOICE_CFG_VBIN_V3BIN                     (0x1F << 16)
+#   define NV_PAVS_VOICE_CFG_VBIN_V4BIN                     (0x1F << 21)
+#   define NV_PAVS_VOICE_CFG_VBIN_V5BIN                     (0x1F << 26)
 #define NV_PAVS_VOICE_CFG_FMT                            0x00000004
+#   define NV_PAVS_VOICE_CFG_FMT_V6BIN                      (0x1F << 0)
+#   define NV_PAVS_VOICE_CFG_FMT_V7BIN                      (0x1F << 5)
 #define NV_PAVS_VOICE_CUR_PSL_START                      0x00000020
 #   define NV_PAVS_VOICE_CUR_PSL_START_BA                   0x00FFFFFF
 #define NV_PAVS_VOICE_CUR_PSH_SAMPLE                     0x00000024
@@ -157,8 +165,21 @@ static const struct {
 #define NV_PAVS_VOICE_PAR_NEXT                           0x0000005C
 #   define NV_PAVS_VOICE_PAR_NEXT_EBO                       0x00FFFFFF
 #define NV_PAVS_VOICE_TAR_VOLA                           0x00000060
+#   define NV_PAVS_VOICE_TAR_VOLA_VOLUME6_B3_0              0x0000000F
+#   define NV_PAVS_VOICE_TAR_VOLA_VOLUME0                   0x0000FFF0
+#   define NV_PAVS_VOICE_TAR_VOLA_VOLUME7_B3_0              0x000F0000
+#   define NV_PAVS_VOICE_TAR_VOLA_VOLUME1                   0xFFF00000
 #define NV_PAVS_VOICE_TAR_VOLB                           0x00000064
+#   define NV_PAVS_VOICE_TAR_VOLB_VOLUME6_B7_4              0x0000000F
+#   define NV_PAVS_VOICE_TAR_VOLB_VOLUME2                   0x0000FFF0
+#   define NV_PAVS_VOICE_TAR_VOLB_VOLUME7_B7_4              0x000F0000
+#   define NV_PAVS_VOICE_TAR_VOLB_VOLUME3                   0xFFF00000
 #define NV_PAVS_VOICE_TAR_VOLC                           0x00000068
+#   define NV_PAVS_VOICE_TAR_VOLC_VOLUME6_B11_8             0x0000000F
+#   define NV_PAVS_VOICE_TAR_VOLC_VOLUME4                   0x0000FFF0
+#   define NV_PAVS_VOICE_TAR_VOLC_VOLUME7_B11_8             0x000F0000
+#   define NV_PAVS_VOICE_TAR_VOLC_VOLUME5                   0xFFF00000
+
 #define NV_PAVS_VOICE_TAR_PITCH_LINK                     0x0000007C
 #   define NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE   0x0000FFFF
 #   define NV_PAVS_VOICE_TAR_PITCH_LINK_PITCH               0xFFFF0000
