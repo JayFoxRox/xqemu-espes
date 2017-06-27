@@ -676,18 +676,22 @@ static uint64_t gp_read(void *opaque,
 
     uint64_t r = 0;
     switch (addr) {
-    case NV_PAPU_GPXMEM ... NV_PAPU_GPXMEM + 0x1000*4: {
+    case NV_PAPU_GPXMEM ... NV_PAPU_GPXMEM + 0xFFF*4: {
         uint32_t xaddr = (addr - NV_PAPU_GPXMEM) / 4;
         r = dsp_read_memory(d->gp.dsp, 'X', xaddr);
         break;
     }
-    //FIXME: mixbuf
-    case NV_PAPU_GPYMEM ... NV_PAPU_GPYMEM + 0x800*4: {
+    case NV_PAPU_GPMIXBUF ... NV_PAPU_GPMIXBUF + 0x3FF*4: {
+        uint32_t xaddr = (addr - NV_PAPU_GPMIXBUF) / 4;
+        r = dsp_read_memory(d->gp.dsp, 'X', 3072 + xaddr);
+        break;
+    }
+    case NV_PAPU_GPYMEM ... NV_PAPU_GPYMEM + 0x7FF*4: {
         uint32_t yaddr = (addr - NV_PAPU_GPYMEM) / 4;
         r = dsp_read_memory(d->gp.dsp, 'Y', yaddr);
         break;
     }
-    case NV_PAPU_GPPMEM ... NV_PAPU_GPPMEM + 0x1000*4: {
+    case NV_PAPU_GPPMEM ... NV_PAPU_GPPMEM + 0xFFF*4: {
         uint32_t paddr = (addr - NV_PAPU_GPPMEM) / 4;
         r = dsp_read_memory(d->gp.dsp, 'P', paddr);
         break;
@@ -707,14 +711,26 @@ static void gp_write(void *opaque, hwaddr addr,
     MCPX_DPRINTF("mcpx apu GP: [0x%llx] = 0x%llx\n", addr, val);
 
     switch (addr) {
-
-//FIXME: Sizes:
-//GPXMEM 0x1000
-//GPMIXBUF 0x400
-//GPYMEM 0x800
-//GPPMEM 0x1000
-
-    //FIXME: XMEM, MIXBUF, YMEM, PMEM
+    case NV_PAPU_GPXMEM ... NV_PAPU_GPXMEM + 0xFFF*4: {
+        uint32_t xaddr = (addr - NV_PAPU_GPXMEM) / 4;
+        dsp_write_memory(d->gp.dsp, 'X', xaddr, val);
+        break;
+    }
+    case NV_PAPU_GPMIXBUF ... NV_PAPU_GPMIXBUF + 0x3FF*4: {
+        uint32_t xaddr = (addr - NV_PAPU_GPMIXBUF) / 4;
+        dsp_write_memory(d->gp.dsp, 'X', 3072 + xaddr, val);
+        break;
+    }
+    case NV_PAPU_GPYMEM ... NV_PAPU_GPYMEM + 0x7FF*4: {
+        uint32_t yaddr = (addr - NV_PAPU_GPYMEM) / 4;
+        dsp_write_memory(d->gp.dsp, 'Y', yaddr, val);
+        break;
+    }
+    case NV_PAPU_GPPMEM ... NV_PAPU_GPPMEM + 0xFFF*4: {
+        uint32_t paddr = (addr - NV_PAPU_GPPMEM) / 4;
+        dsp_write_memory(d->gp.dsp, 'P', paddr, val);
+        break;
+    }
     case NV_PAPU_GPRST:
         proc_rst_write(d->gp.dsp, d->gp.regs[NV_PAPU_GPRST], val);
         d->gp.regs[NV_PAPU_GPRST] = val;
@@ -738,17 +754,17 @@ static uint64_t ep_read(void *opaque,
 
     uint64_t r = 0;
     switch (addr) {
-    case NV_PAPU_EPXMEM ... NV_PAPU_EPXMEM + 0xC00*4: {
+    case NV_PAPU_EPXMEM ... NV_PAPU_EPXMEM + 0xBFF*4: {
         uint32_t xaddr = (addr - NV_PAPU_EPXMEM) / 4;
         r = dsp_read_memory(d->ep.dsp, 'X', xaddr);
         break;
     }
-    case NV_PAPU_EPYMEM ... NV_PAPU_EPYMEM + 0x100*4: {
+    case NV_PAPU_EPYMEM ... NV_PAPU_EPYMEM + 0xFF*4: {
         uint32_t yaddr = (addr - NV_PAPU_EPYMEM) / 4;
         r = dsp_read_memory(d->ep.dsp, 'Y', yaddr);
         break;
     }
-    case NV_PAPU_EPPMEM ... NV_PAPU_EPPMEM + 0x1000*4: {
+    case NV_PAPU_EPPMEM ... NV_PAPU_EPPMEM + 0xFFF*4: {
         uint32_t paddr = (addr - NV_PAPU_EPPMEM) / 4;
         r = dsp_read_memory(d->ep.dsp, 'P', paddr);
         break;
@@ -768,17 +784,17 @@ static void ep_write(void *opaque, hwaddr addr,
     MCPX_DPRINTF("mcpx apu EP: [0x%llx] = 0x%llx\n", addr, val);
 
     switch (addr) {
-    case NV_PAPU_EPXMEM ... NV_PAPU_EPXMEM + 0xC00*4: {
+    case NV_PAPU_EPXMEM ... NV_PAPU_EPXMEM + 0xBFF*4: {
         uint32_t xaddr = (addr - NV_PAPU_EPXMEM) / 4;
         dsp_write_memory(d->ep.dsp, 'X', xaddr, val);
         break;
     }
-    case NV_PAPU_EPYMEM ... NV_PAPU_EPYMEM + 0x100*4: {
+    case NV_PAPU_EPYMEM ... NV_PAPU_EPYMEM + 0xFF*4: {
         uint32_t yaddr = (addr - NV_PAPU_EPYMEM) / 4;
         dsp_write_memory(d->ep.dsp, 'Y', yaddr, val);
         break;
     }
-    case NV_PAPU_EPPMEM ... NV_PAPU_EPPMEM + 0x1000*4: {
+    case NV_PAPU_EPPMEM ... NV_PAPU_EPPMEM + 0xFFF*4: {
         uint32_t paddr = (addr - NV_PAPU_EPPMEM) / 4;
         dsp_write_memory(d->ep.dsp, 'P', paddr, val);
         break;
