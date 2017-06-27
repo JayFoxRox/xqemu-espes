@@ -788,6 +788,16 @@ static void se_frame(void *opaque)
         }
     }
 
+    // Write some sexy sine wave to GP MIXBUF
+    //FIXME: Run VP emulation instead
+    float t = 0.0f;
+    for(unsigned int i = 0; i < 0x20; i++) {
+      int32_t value = sinf(t * 3.14f * 2.0f * 500.0f);
+      value &= 0xFFFFFF;
+      d->gp.regs[NV_PAPU_GPMIXBUF + i] = value;
+      t += 0x20 / 48000.0f;
+    }
+
     if ((d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST)
         && (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
         dsp_start_frame(d->gp.dsp);
