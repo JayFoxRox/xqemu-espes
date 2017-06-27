@@ -941,9 +941,11 @@ static void se_frame(void *opaque)
                     sample_pos += cbo;
                     assert(sample_pos <= ebo);
 
-                    //FIXME: The mod ebo thing is a hack!
                     assert(container_size != NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM);
-                    uint32_t linear_addr = ba + (sample_pos % (ebo + 1)) * container_sizes[container_size];
+                    unsigned int block_size = container_sizes[container_size];
+                    block_size *= stereo ? 2 : 1;
+
+                    uint32_t linear_addr = ba + (sample_pos % (ebo + 1)) * block_size;
                     hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
                     //FIXME: Handle reading accross pages?!
 
@@ -968,6 +970,7 @@ static void se_frame(void *opaque)
                         if (stereo) {
                             // Advance cursor to second channel
                             //FIXME!!!
+                            addr += block_size / 2;
                         } else {
                             assert(sizeof(samples[0]) == 0x20 * 4);
                             memcpy(samples[1], samples[0], sizeof(samples[0]));
@@ -1078,8 +1081,8 @@ static void se_frame(void *opaque)
                     //printf("Adding voice 0x%04X to bin %d [Rate %.2f, Volume 0x%03X] sample %d at %d [%.2fs]\n", v, bin[j], rate, vol[j], samples[0], cbo, cbo / (rate * 48000.0f));
                     for(unsigned int i = 0; i < 0x20; i++) {
                         //FIXME: how is the volume added?
-                        //FIXME: What happens to the other channel?
-                        mixbuf[bin[j]][i] += (vol[j] * samples[0][i]) / 0xFFF;
+                        //FIXME: What happens to the other channel? Is this behaviour correct?
+                        mixbuf[bin[j]][i] += (0xFFF - vol[j]) * samples[j % 2][i] / 0xFFF;
                     }
                 }
 skipvoice:; // FIXME: Remove.. hack!
@@ -1110,7 +1113,7 @@ skipvoice:; // FIXME: Remove.. hack!
         // Map channels from DirectSound -> WAV
         uint32_t sample_0 = mixbuf[0][i] & 0xFFFFFF;
         sample_0 *= 0x80;
-        uint32_t sample_2 = mixbuf[2][i] & 0xFFFFFF;
+        uint32_t sample_2 = mixbuf[1][i] & 0xFFFFFF;
         sample_2 *= 0x80;
         //printf("Sample: %d %d\n", sample_0, sample_2);
         wav_out_write(vp_wav_out, &sample_0, 3); // Front left
