@@ -169,11 +169,11 @@ static void dsp_dma_run(DSPDMAState *s)
             }
 
             // write to scratch memory
-            s->scratch_rw(s->scratch_rw_opaque,
+            s->scratch_rw(s->rw_opaque,
                 scratch_buf, scratch_addr, count*item_size, 1);
         } else {
             // read from scratch memory
-            s->scratch_rw(s->scratch_rw_opaque,
+            s->scratch_rw(s->rw_opaque,
                 scratch_buf, scratch_addr, count*item_size, 0);
 
             int i;

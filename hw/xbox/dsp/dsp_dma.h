@@ -36,8 +36,9 @@ typedef enum DSPDMARegister {
 typedef struct DSPDMAState {
     dsp_core_t* core;
 
-    void* scratch_rw_opaque;
-    dsp_scratch_rw_func scratch_rw;
+    void* rw_opaque;
+    dsp_rw_func scratch_rw;
+    dsp_rw_func mixbuf_rw;
 
     uint32_t configuration;
     uint32_t control;

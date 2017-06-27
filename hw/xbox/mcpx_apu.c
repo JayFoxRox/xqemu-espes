@@ -64,6 +64,10 @@
 #define NV_PAPU_GPSMAXSGE                                0x000020D4
 #define NV_PAPU_EPSMAXSGE                                0x000020DC
 
+#define NV_PAPU_GPXMEM                                   0x00000000
+#define NV_PAPU_GPMIXBUF                                 0x00005000
+#define NV_PAPU_GPYMEM                                   0x00006000
+#define NV_PAPU_GPPMEM                                   0x0000A000
 #define NV_PAPU_GPRST                                    0x0000FFFC
 #define NV_PAPU_GPRST_GPRST                                 (1 << 0)
 #define NV_PAPU_GPRST_GPDSPRST                              (1 << 1)
@@ -569,6 +573,17 @@ static void gp_scratch_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len,
                ptr, addr, len, dir);
 }
 
+static void gp_mixbuf_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len, bool dir)
+{
+    MCPXAPUState *d = opaque;
+    uint8_t* mixbuf = (uint8_t*)&d->regs[NV_PAPU_GPMIXBUF];
+    if (dir) {
+      memcpy(&mixbuf[addr], ptr, len);
+    } else {
+      memcpy(ptr, &mixbuf[addr], len);
+    }
+}
+
 static void ep_scratch_rw(void *opaque, uint8_t* ptr, uint32_t addr, size_t len, bool dir)
 {
     MCPXAPUState *d = opaque;
@@ -593,7 +608,28 @@ static uint64_t gp_read(void *opaque,
 {
     MCPXAPUState *d = opaque;
 
-    uint64_t r = d->gp.regs[addr];
+    uint64_t r = 0;
+    switch (addr) {
+    case NV_PAPU_GPXMEM ... NV_PAPU_GPXMEM + 0x1000*4: {
+        uint32_t xaddr = (addr - NV_PAPU_GPXMEM) / 4;
+        r = dsp_read_memory(d->gp.dsp, 'X', xaddr);
+        break;
+    }
+    //FIXME: mixbuf
+    case NV_PAPU_GPYMEM ... NV_PAPU_GPYMEM + 0x800*4: {
+        uint32_t yaddr = (addr - NV_PAPU_GPYMEM) / 4;
+        r = dsp_read_memory(d->gp.dsp, 'Y', yaddr);
+        break;
+    }
+    case NV_PAPU_GPPMEM ... NV_PAPU_GPPMEM + 0x1000*4: {
+        uint32_t paddr = (addr - NV_PAPU_GPPMEM) / 4;
+        r = dsp_read_memory(d->gp.dsp, 'P', paddr);
+        break;
+    }
+    default:
+        r = d->gp.regs[addr];
+        break;
+    }
     MCPX_DPRINTF("mcpx apu GP: read [0x%llx] -> 0x%llx\n", addr, r);
     return r;
 }
@@ -605,6 +641,14 @@ static void gp_write(void *opaque, hwaddr addr,
     MCPX_DPRINTF("mcpx apu GP: [0x%llx] = 0x%llx\n", addr, val);
 
     switch (addr) {
+
+//FIXME: Sizes:
+//GPXMEM 0x1000
+//GPMIXBUF 0x400
+//GPYMEM 0x800
+//GPPMEM 0x1000
+
+    //FIXME: XMEM, MIXBUF, YMEM, PMEM
     case NV_PAPU_GPRST:
         proc_rst_write(d->gp.dsp, d->gp.regs[NV_PAPU_GPRST], val);
         d->gp.regs[NV_PAPU_GPRST] = val;
@@ -762,8 +806,8 @@ static int mcpx_apu_initfn(PCIDevice *dev)
 
     d->se.frame_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, se_frame, d);
 
-    d->gp.dsp = dsp_init(d, gp_scratch_rw);
-    d->ep.dsp = dsp_init(d, ep_scratch_rw);
+    d->gp.dsp = dsp_init(d, gp_scratch_rw, gp_mixbuf_rw);
+    d->ep.dsp = dsp_init(d, ep_scratch_rw, NULL);
 
     return 0;
 }
