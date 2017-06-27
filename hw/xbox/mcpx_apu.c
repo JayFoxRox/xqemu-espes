@@ -153,12 +153,27 @@ static const struct {
 #define NV_PAVS_VOICE_CFG_FMT                            0x00000004
 #   define NV_PAVS_VOICE_CFG_FMT_V6BIN                      (0x1F << 0)
 #   define NV_PAVS_VOICE_CFG_FMT_V7BIN                      (0x1F << 5)
+#   define NV_PAVS_VOICE_CFG_FMT_DATA_TYPE                  (1 << 24)
+#   define NV_PAVS_VOICE_CFG_FMT_LOOP                       (1 << 25)
+#   define NV_PAVS_VOICE_CFG_FMT_STEREO                     (1 << 27)
+#   define NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE                (0x3 << 28)
+#       define NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_U8             0
+#       define NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S16            1
+#       define NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S24            2
+#       define NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S32            3
+#   define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE             (0x3 << 30)
+#       define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_B8          0
+#       define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_B16         1
+#       define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM       2
+#       define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_B32         3
+
 #define NV_PAVS_VOICE_CUR_PSL_START                      0x00000020
 #   define NV_PAVS_VOICE_CUR_PSL_START_BA                   0x00FFFFFF
 #define NV_PAVS_VOICE_CUR_PSH_SAMPLE                     0x00000024
 #   define NV_PAVS_VOICE_CUR_PSH_SAMPLE_LBO                 0x00FFFFFF
 #define NV_PAVS_VOICE_PAR_STATE                          0x00000054
 #   define NV_PAVS_VOICE_PAR_STATE_PAUSED                   (1 << 18)
+#   define NV_PAVS_VOICE_PAR_STATE_NEW_VOICE                (1 << 20)
 #   define NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE             (1 << 21)
 #define NV_PAVS_VOICE_PAR_OFFSET                         0x00000058
 #   define NV_PAVS_VOICE_PAR_OFFSET_CBO                     0x00FFFFFF
@@ -211,6 +226,10 @@ static const struct {
 # define MCPX_DPRINTF(format, ...)       do { } while (0)
 #endif
 
+#define APU_DEBUG
+#ifdef APU_DEBUG
+#include "wav_out.h"
+#endif
 
 typedef struct MCPXAPUState {
     PCIDevice dev;
@@ -838,7 +857,16 @@ static void se_frame(void *opaque)
     MCPX_DPRINTF("mcpx frame ping\n");
     int list;
 
+    uint64_t start = qemu_clock_get_ns(QEMU_CLOCK_HOST);
+
     int32_t mixbuf[32][0x20] = {0};
+
+    static WAVOutState* buf_wav_out;
+    if (buf_wav_out == NULL) {
+        buf_wav_out = g_malloc0(sizeof(WAVOutState) * 2);
+        wav_out_init(&buf_wav_out[0], "vp-out-buf0.wav", 44100, 16, 1);
+        wav_out_init(&buf_wav_out[1], "vp-out-buf1.wav", 48000, 24, 1);
+    }
 
     for (list=0; list < 3; list++) {
         hwaddr top, current, next;
@@ -859,50 +887,94 @@ static void se_frame(void *opaque)
                 fe_method(d, SE2FE_IDLE_VOICE, d->regs[current]);
             } else {
                 uint32_t v = d->regs[current];
-                int32_t samples[0x20];
+                int32_t samples[2][0x20] = {0};
 
                 int16_t p = voice_get_mask(d, v, NV_PAVS_VOICE_TAR_PITCH_LINK, NV_PAVS_VOICE_TAR_PITCH_LINK_PITCH);
                 float rate = powf(2.0f, p / 4096.0f);
                 //printf("Got %f\n", rate * 48000.0f);
 
-                float overdrive = 9.0f; //FIXME: This is just a hack because our APU runs too rarely
+                float overdrive = 1.0f; //FIXME: This is just a hack because our APU runs too rarely
 
                 //NV_PAVS_VOICE_PAR_OFFSET_CBO
+                bool stereo = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_STEREO);
+                unsigned int sample_size = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE);
+
+                // B8, B16, ADPCM, B32
+                unsigned int container_sizes[4] = { 1, 2, 0, 4 };
+                unsigned int container_size = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE);
+
+                bool stream = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_DATA_TYPE);
+                assert(!stream);
+                bool paused = voice_get_mask(d, v, NV_PAVS_VOICE_PAR_STATE, NV_PAVS_VOICE_PAR_STATE_PAUSED);
+                bool loop = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_LOOP);
                 uint32_t ebo = voice_get_mask(d, v, NV_PAVS_VOICE_PAR_NEXT, NV_PAVS_VOICE_PAR_NEXT_EBO);
                 uint32_t cbo = voice_get_mask(d, v, NV_PAVS_VOICE_PAR_OFFSET, NV_PAVS_VOICE_PAR_OFFSET_CBO);
+                uint32_t lbo = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_PSH_SAMPLE, NV_PAVS_VOICE_CUR_PSH_SAMPLE_LBO);
                 uint32_t ba = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_PSL_START, NV_PAVS_VOICE_CUR_PSL_START_BA);
 
-                //FIXME: !!
-                uint32_t format = 1;
-                unsigned int container_size = 2; // FIXME: !!!
+                // This is probably cleared when the first sample is played
+                //FIXME: How will this behave if CBO > EBO on first play?
+                //FIXME: How will this behave if paused?
+                voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, NV_PAVS_VOICE_PAR_STATE_NEW_VOICE, 0);
 
-                hwaddr base_addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, ba);
                 for(unsigned int i = 0; i < 0x20; i++) {
-                    uint32_t sample_pos = cbo + (uint32_t)(i * rate * overdrive);
+
+                    uint32_t sample_pos = (uint32_t)(i * rate * overdrive);
+
+                    if ((cbo + sample_pos) > ebo) {
+                      if (!loop) {
+                        // Set to safe state
+                        cbo = ebo; //FIXME: Will the hw do this?
+                        //FIXME: Not sure if this happens.. needs a hwtest.
+                        // Some RE also suggests that the voices will automaticly be removed from the list (!!!)
+                        voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE, 0);
+                        break;
+                      }
+                      // Now go to loop start
+                      //FIXME: Make sure this logic still works for very high sample_pos greater than ebo
+                      cbo += sample_pos;
+                      cbo %= ebo + 1;
+                      cbo += lbo;
+                      cbo -= sample_pos;
+                    }
+
+                    sample_pos += cbo;
+                    assert(sample_pos <= ebo);
+
                     //FIXME: The mod ebo thing is a hack!
-                    hwaddr addr = base_addr + (sample_pos % (ebo + 1)) * container_size;
+                    assert(container_size != NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM);
+                    uint32_t linear_addr = ba + (sample_pos % (ebo + 1)) * container_sizes[container_size];
+                    hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
+                    //FIXME: Handle reading accross pages?!
+
                     //printf("Sampling from 0x%08X\n", addr);
 
                     // Get samples for this voice
-                    switch(format) {
-                    case 0: // 8 bit unsigned
-                        samples[i] = ldub_phys(addr);
-                        break;
-                    case 1: // 16 bit signed
-                        samples[i] = (int16_t)lduw_le_phys(addr);
-                        break;
-                    case 2: // 24 bit signed
-                        samples[i] = (lduw_le_phys(addr) << 8) >> 8;
-                        break;
-                    case 3: // ADPCM
-                        printf("Missing ADPCM playback!\n");
-                        break;
+                    for(unsigned int channel = 0; channel < 2; channel++) {
+                        switch(sample_size) {
+                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_U8:
+                            samples[channel][i] = ldub_phys(addr);
+                            break;
+                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S16:
+                            samples[channel][i] = (int16_t)lduw_le_phys(addr);
+                            break;
+                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S24:
+                            samples[channel][i] = (int32_t)(ldl_le_phys(addr) << 8) >> 8;
+                            break;
+                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S32:
+                            samples[channel][i] = (int32_t)ldl_le_phys(addr);
+                            break;
+                        }
+                        if (stereo) {
+                            // Advance cursor to second channel
+                            //FIXME!!!
+                        } else {
+                            assert(sizeof(samples[0]) == 0x20 * 4);
+                            memcpy(samples[1], samples[0], sizeof(samples[0]));
+                            break;
+                        }
                     }
                 }
-
-                //FIXME: Can not be done in the list processing or we might do a voice twice!
-                cbo += 0x20 * rate * overdrive;
-                voice_set_mask(d, v, NV_PAVS_VOICE_PAR_OFFSET, NV_PAVS_VOICE_PAR_OFFSET_CBO, cbo);
 
                 //FIXME: Decode voice volume and bins
                 int bin[8] = {
@@ -930,23 +1002,88 @@ static void se_frame(void *opaque)
                   voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLA, NV_PAVS_VOICE_TAR_VOLA_VOLUME7_B3_0),
                 };
 
-#if 0
-                if (ba == 0x1F08) {
-                  printf("gimme thunder!\n");
+                if (v == 0x0044) {
+                  static unsigned int x = 0;
+                  
+                  for(unsigned int i = 0; i < 0x20; i++) {
+                    uint32_t sample_pos = cbo + (uint32_t)(i * rate * overdrive);
+                    //uint32_t sample_pos = cbo + (uint32_t)(i * rate * overdrive);
+                    //FIXME: The mod ebo thing is a hack!
+                    uint32_t linear_addr = ba + (sample_pos % (ebo + 1)) * container_sizes[container_size];
+                    hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
+                    //printf("Sampling from 0x%08X\n", addr);
+                    int16_t sample = (int16_t)lduw_le_phys(addr);
+                    wav_out_write(&buf_wav_out[0], &sample, 2); // voice input
+                    x++;
+                  }
+                  wav_out_update(&buf_wav_out[0]);
+
+                  for(unsigned int i = 0; i < 0x20; i++) {
+                    wav_out_write(&buf_wav_out[1], &samples[0][i], 3); // mixbuf for voice
+                    wav_out_write(&buf_wav_out[1], &samples[1][i], 3); // mixbuf for voice
+                  }
+                  wav_out_update(&buf_wav_out[1]);
+                }
+
+                if (paused) {
+                  assert(sizeof(samples) == 0x20 * 4 * 2);
+                  memset(samples, 0x00, sizeof(samples));
                 } else {
+                  cbo += 0x20 * rate * overdrive;
+                  voice_set_mask(d, v, NV_PAVS_VOICE_PAR_OFFSET, NV_PAVS_VOICE_PAR_OFFSET_CBO, cbo);
+                }
+
+                const char* name = "unk";
+#if 0
+                // Whitelisted: !
+                if (ba == 0x1F08) {
+                  name = "Thunder";
+                } else if (ba == 0x141E8) { // White noise (in bad range?! 16U?!)
+                  name = "White Noise";
+                } else if (ba == 0xD1F0) { // Beep sound
+                  name = "Beep";
+                } else if (ba == 0x102E8) { // Flubber / Bubble sound
+                  name = "Flubber";
+
+                // Blacklisted: !
+                } else if (ba == 0xF998) { // garbage? some sawtooth I guess
+                  name = "Sawtooth";
+                  goto skipvoice;
+                } else if (ba == 0x978) { // silence
+                  name = "Silence";
+                  goto skipvoice;
+
+
+                ///// Wavebank XDK sample
+                } else if (ba == 0x246C50) { // garbage? some sawtooth I guess
+                  name = "Sound 9"; // "The call is tails"
+                } else if (ba == 0x3A6694) { // garbage? some sawtooth I guess
+                  name = "Sound 13"; // Music
+
+
+                ///// Catchall
+                } else {
+                  printf("Skipping ", ba);
                   goto skipvoice;
                 }
+                
+
 #endif
+
+                //FIXME: If phase negations means to flip the signal upside down
+                //       we should modify volume of bin6 and bin7 here.
 
                 // Mix samples into voice bins
                 for(unsigned int j = 0; j < 8; j++) {
-                    printf("Adding voice 0x%04X to bin %d [Rate %.2f, Volume 0x%03X] sample %d at %d [%.2fs]\n", v, bin[j], rate, vol[j], samples[0], cbo, cbo / (rate * 48000.0f));
+                    //printf("Adding voice 0x%04X to bin %d [Rate %.2f, Volume 0x%03X] sample %d at %d [%.2fs]\n", v, bin[j], rate, vol[j], samples[0], cbo, cbo / (rate * 48000.0f));
                     for(unsigned int i = 0; i < 0x20; i++) {
                         //FIXME: how is the volume added?
-                        mixbuf[bin[j]][i] += (vol[j] * samples[i]) / 0xFFF;
+                        //FIXME: What happens to the other channel?
+                        mixbuf[bin[j]][i] += (vol[j] * samples[0][i]) / 0xFFF;
                     }
                 }
-skipvoice:; // FIXME: Remoe.. hack!
+skipvoice:; // FIXME: Remove.. hack!
+                printf("Voice 0x%04X: '%s' (0x%X)\n", v, name, ba);
             }
             MCPX_DPRINTF("next voice %d\n", d->regs[next]);
             d->regs[current] = d->regs[next];
@@ -955,26 +1092,93 @@ skipvoice:; // FIXME: Remoe.. hack!
 
     // Write VP result to mixbuf
     for(unsigned int j = 0; j < 32; j++) {
-      for(unsigned int i = 0; i < 0x20; i++) {
-          dsp_write_memory(d->gp.dsp, 'X', 3072 + j * 0x20 + i, mixbuf[j][i] & 0xFFFFFF);
-      }
+        for(unsigned int i = 0; i < 0x20; i++) {
+            dsp_write_memory(d->gp.dsp, 'X', 3072 + j * 0x20 + i, mixbuf[j][i] & 0xFFFFFF);
+        }
     }
+
+#if 1
+    // We can not guarantee sync of AC97 and the APU if the emu is not
+    // running in realtime. So for development we should have a clean way
+    // of looking at the data. This is said method for the VP.
+    static void* vp_wav_out = NULL;
+    if (vp_wav_out == NULL) {
+        vp_wav_out = g_malloc0(sizeof(WAVOutState));
+        wav_out_init(vp_wav_out, "vp-out.wav", 48000, 24, 2);
+    }
+    for(unsigned int i = 0; i < 0x20; i++) {
+        // Map channels from DirectSound -> WAV
+        uint32_t sample_0 = mixbuf[0][i] & 0xFFFFFF;
+        sample_0 *= 0x80;
+        uint32_t sample_2 = mixbuf[2][i] & 0xFFFFFF;
+        sample_2 *= 0x80;
+        //printf("Sample: %d %d\n", sample_0, sample_2);
+        wav_out_write(vp_wav_out, &sample_0, 3); // Front left
+        wav_out_write(vp_wav_out, &sample_2, 3); // Front right
+/*
+        wav_writer(mixbuf[1][i] & 0xFFFFFF); // Center
+        wav_writer(mixbuf[5][i] & 0xFFFFFF); // LFE
+        wav_writer(mixbuf[3][i] & 0xFFFFFF); // Rear left
+        wav_writer(mixbuf[4][i] & 0xFFFFFF); // Rear right
+*/
+    }
+    wav_out_update(vp_wav_out);
+#endif
+
+    uint64_t vp_done = qemu_clock_get_ns(QEMU_CLOCK_HOST);
 
     if ((d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST)
         && (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
         dsp_start_frame(d->gp.dsp);
 
         // hax
-        dsp_run(d->gp.dsp, 40000);
+        dsp_run(d->gp.dsp, 10000);
     }
+
+#if 0
+    // Dump the GP output of DirectSound.
+    
+    uint32_t offset = 0x8000;
+    // NV_PAPU_GPSADDR
+    wav_init("gp-out.wav");
+
+    for(unsigned int i = 0; i < 0x20; i++) {
+        // Map channels from DirectSound -> WAV
+        wav_writer(gps[0][i] & 0xFFFFFF); // Front left
+    }
+#endif
+
+    uint64_t gp_done = qemu_clock_get_ns(QEMU_CLOCK_HOST);
+
     if ((d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPRST)
         && (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPDSPRST)) {
         dsp_start_frame(d->ep.dsp);
 
         // hax
-        printf("Running EP code\n");
+        //printf("Running EP code\n");
         dsp_run(d->ep.dsp, 1000);
     }
+
+#if 0
+    // Dump the EP output
+    //FIXME: Use the actual FIFO channel addresses and output both, PCM and SPDIF
+
+    wav_init("ep-out-pcm.wav");
+    //FIXME: Support SPDIF
+    //wav_init("ep-out-spdif.wav");
+
+    //NV_PAPU_EPFADDR
+    
+#endif
+
+    uint64_t ep_done = qemu_clock_get_ns(QEMU_CLOCK_HOST);
+
+    printf("\n");
+    printf("VP took %.1f us\n", (vp_done - start) / 1000.0f);
+    printf("GP took %.1f us\n", (gp_done - vp_done) / 1000.0f);
+    printf("EP took %.1f us\n", (ep_done - gp_done) / 1000.0f);
+    printf("Total: %.1f us\n", (ep_done - start) / 1000.0f);
+    printf("Limit: %.1f us\n", (32.0 / 48000.0) * 1000000.0f);
 }
 
 
