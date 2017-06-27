@@ -837,6 +837,9 @@ static void se_frame(void *opaque)
     timer_mod(d->se.frame_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 10);
     MCPX_DPRINTF("mcpx frame ping\n");
     int list;
+
+    int32_t mixbuf[32][0x20] = {0};
+
     for (list=0; list < 3; list++) {
         hwaddr top, current, next;
         top = voice_list_regs[list].top;
@@ -854,24 +857,107 @@ static void se_frame(void *opaque)
                     NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE)) {
                 MCPX_DPRINTF("voice %d not active...!\n", d->regs[current]);
                 fe_method(d, SE2FE_IDLE_VOICE, d->regs[current]);
+            } else {
+                uint32_t v = d->regs[current];
+                int32_t samples[0x20];
+
+                int16_t p = voice_get_mask(d, v, NV_PAVS_VOICE_TAR_PITCH_LINK, NV_PAVS_VOICE_TAR_PITCH_LINK_PITCH);
+                float rate = powf(2.0f, p / 4096.0f);
+                //printf("Got %f\n", rate * 48000.0f);
+
+                float overdrive = 9.0f; //FIXME: This is just a hack because our APU runs too rarely
+
+                //NV_PAVS_VOICE_PAR_OFFSET_CBO
+                uint32_t ebo = voice_get_mask(d, v, NV_PAVS_VOICE_PAR_NEXT, NV_PAVS_VOICE_PAR_NEXT_EBO);
+                uint32_t cbo = voice_get_mask(d, v, NV_PAVS_VOICE_PAR_OFFSET, NV_PAVS_VOICE_PAR_OFFSET_CBO);
+                uint32_t ba = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_PSL_START, NV_PAVS_VOICE_CUR_PSL_START_BA);
+
+                //FIXME: !!
+                uint32_t format = 1;
+                unsigned int container_size = 2; // FIXME: !!!
+
+                hwaddr base_addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, ba);
+                for(unsigned int i = 0; i < 0x20; i++) {
+                    uint32_t sample_pos = cbo + (uint32_t)(i * rate * overdrive);
+                    //FIXME: The mod ebo thing is a hack!
+                    hwaddr addr = base_addr + (sample_pos % (ebo + 1)) * container_size;
+                    //printf("Sampling from 0x%08X\n", addr);
+
+                    // Get samples for this voice
+                    switch(format) {
+                    case 0: // 8 bit unsigned
+                        samples[i] = ldub_phys(addr);
+                        break;
+                    case 1: // 16 bit signed
+                        samples[i] = (int16_t)lduw_le_phys(addr);
+                        break;
+                    case 2: // 24 bit signed
+                        samples[i] = (lduw_le_phys(addr) << 8) >> 8;
+                        break;
+                    case 3: // ADPCM
+                        printf("Missing ADPCM playback!\n");
+                        break;
+                    }
+                }
+
+                //FIXME: Can not be done in the list processing or we might do a voice twice!
+                cbo += 0x20 * rate * overdrive;
+                voice_set_mask(d, v, NV_PAVS_VOICE_PAR_OFFSET, NV_PAVS_VOICE_PAR_OFFSET_CBO, cbo);
+
+                //FIXME: Decode voice volume and bins
+                int bin[8] = {
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_VBIN, NV_PAVS_VOICE_CFG_VBIN_V0BIN),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_VBIN, NV_PAVS_VOICE_CFG_VBIN_V1BIN),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_VBIN, NV_PAVS_VOICE_CFG_VBIN_V2BIN),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_VBIN, NV_PAVS_VOICE_CFG_VBIN_V3BIN),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_VBIN, NV_PAVS_VOICE_CFG_VBIN_V4BIN),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_VBIN, NV_PAVS_VOICE_CFG_VBIN_V5BIN),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_V6BIN),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_V7BIN)
+                };
+                uint16_t vol[8] = {
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLA, NV_PAVS_VOICE_TAR_VOLA_VOLUME0),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLA, NV_PAVS_VOICE_TAR_VOLA_VOLUME1),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLB, NV_PAVS_VOICE_TAR_VOLB_VOLUME2),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLB, NV_PAVS_VOICE_TAR_VOLB_VOLUME3),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLC, NV_PAVS_VOICE_TAR_VOLC_VOLUME4),
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLC, NV_PAVS_VOICE_TAR_VOLC_VOLUME5),
+                  (voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLC, NV_PAVS_VOICE_TAR_VOLC_VOLUME6_B11_8) << 8) |
+                  (voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLB, NV_PAVS_VOICE_TAR_VOLB_VOLUME6_B7_4) << 4) |
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLA, NV_PAVS_VOICE_TAR_VOLA_VOLUME6_B3_0),
+                  (voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLC, NV_PAVS_VOICE_TAR_VOLC_VOLUME7_B11_8) << 8) |
+                  (voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLB, NV_PAVS_VOICE_TAR_VOLB_VOLUME7_B7_4) << 4) |
+                  voice_get_mask(d, v, NV_PAVS_VOICE_TAR_VOLA, NV_PAVS_VOICE_TAR_VOLA_VOLUME7_B3_0),
+                };
+
+#if 0
+                if (ba == 0x1F08) {
+                  printf("gimme thunder!\n");
+                } else {
+                  goto skipvoice;
+                }
+#endif
+
+                // Mix samples into voice bins
+                for(unsigned int j = 0; j < 8; j++) {
+                    printf("Adding voice 0x%04X to bin %d [Rate %.2f, Volume 0x%03X] sample %d at %d [%.2fs]\n", v, bin[j], rate, vol[j], samples[0], cbo, cbo / (rate * 48000.0f));
+                    for(unsigned int i = 0; i < 0x20; i++) {
+                        //FIXME: how is the volume added?
+                        mixbuf[bin[j]][i] += (vol[j] * samples[i]) / 0xFFF;
+                    }
+                }
+skipvoice:; // FIXME: Remoe.. hack!
             }
             MCPX_DPRINTF("next voice %d\n", d->regs[next]);
             d->regs[current] = d->regs[next];
         }
     }
 
-    // Write some sexy sine wave to GP MIXBUF
-    //FIXME: Run VP emulation instead
-    static float t = 0.0f;
-    for(unsigned int i = 0; i < 0x20; i++) {
-      int32_t value = 0x7FFF * sinf(t * 3.14f * 2.0f * 500.0f);
-      printf("[%X] = %d\n", i * 2, value);
-      value &= 0xFFFFFF;
-      for(unsigned int j = 0; j < 32; j++) {
-        dsp_write_memory(d->gp.dsp, 'X', 3072 + j * 0x20 + i, 0);
+    // Write VP result to mixbuf
+    for(unsigned int j = 0; j < 32; j++) {
+      for(unsigned int i = 0; i < 0x20; i++) {
+          dsp_write_memory(d->gp.dsp, 'X', 3072 + j * 0x20 + i, mixbuf[j][i] & 0xFFFFFF);
       }
-      dsp_write_memory(d->gp.dsp, 'X', 3072 + 0 * 0x20 + i, value);
-      t += 1.0f / 48000.0f;
     }
 
     if ((d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST)
@@ -879,7 +965,7 @@ static void se_frame(void *opaque)
         dsp_start_frame(d->gp.dsp);
 
         // hax
-        dsp_run(d->gp.dsp, 1000);
+        dsp_run(d->gp.dsp, 40000);
     }
     if ((d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPRST)
         && (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPDSPRST)) {

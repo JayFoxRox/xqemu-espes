@@ -28,7 +28,7 @@
 
 #include "dsp_cpu.h"
 
-#define TRACE_DSP_DISASM 1
+#define TRACE_DSP_DISASM 0
 #define TRACE_DSP_DISASM_REG 0
 #define TRACE_DSP_DISASM_MEM 0
 
