@@ -1126,20 +1126,48 @@ skipvoice:; // FIXME: Remove.. hack!
         dsp_start_frame(d->gp.dsp);
 
         // hax
-        dsp_run(d->gp.dsp, 10000);
+        dsp_run(d->gp.dsp, 40000);
     }
 
-#if 0
+#if 1
     // Dump the GP output of DirectSound.
-    
-    uint32_t offset = 0x8000;
-    // NV_PAPU_GPSADDR
-    wav_init("gp-out.wav");
+    //FIXME: Would need special code to dump out bootsound probably..
+    //       The bootsound dumper is probably closer to EP dumper
 
-    for(unsigned int i = 0; i < 0x20; i++) {
-        // Map channels from DirectSound -> WAV
-        wav_writer(gps[0][i] & 0xFFFFFF); // Front left
+    // FIXME: Sync this somehow? Where does the GP keep the last DMA position?
+
+    // Read chunks of GPS
+    uint32_t samples[6][0x20];
+    static int ring_offset = 0;
+    ring_offset %= 0x800;
+    for(unsigned int j = 0; j < 6; j++) {
+        scratch_rw(d->regs[NV_PAPU_GPSADDR], d->regs[NV_PAPU_GPSMAXSGE],
+                   samples[j], 0x8000 + j * 0x800 + ring_offset, 0x20 * 4, 0);
     }
+    //ring_offset += 0x20 * 4;
+
+    static void* gp_wav_out = NULL;
+    if (gp_wav_out == NULL) {
+        gp_wav_out = g_malloc0(sizeof(WAVOutState));
+        wav_out_init(gp_wav_out, "gp-out.wav", 48000, 24, 6);
+    }
+    for(unsigned int i = 0; i < 0x20; i++) {
+
+        // Map channels from DirectSound -> WAV
+        unsigned int channel_map[] = {
+            0, 2, // Front left / right
+            1,    // Center
+            5,    // LFE
+            3, 4  // Rear left / right
+        };
+
+        for(unsigned int j = 0; j < 6; j++) {
+            uint32_t sample = samples[channel_map[j]][i] & 0xFFFFFF;
+            sample *= 0x80;
+            wav_out_write(gp_wav_out, &sample, 3);
+        }
+    }
+    wav_out_update(gp_wav_out);
 #endif
 
     uint64_t gp_done = qemu_clock_get_ns(QEMU_CLOCK_HOST);
