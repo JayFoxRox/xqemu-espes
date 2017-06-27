@@ -106,6 +106,9 @@ static const struct {
 #define NV1BA0_PIO_SET_CURRENT_VOICE                     0x000002F8
 #define NV1BA0_PIO_SET_VOICE_CFG_VBIN                    0x00000300
 #define NV1BA0_PIO_SET_VOICE_CFG_FMT                     0x00000304
+#define NV1BA0_PIO_SET_VOICE_TAR_VOLA                    0x00000360
+#define NV1BA0_PIO_SET_VOICE_TAR_VOLB                    0x00000364
+#define NV1BA0_PIO_SET_VOICE_TAR_VOLC                    0x00000368
 #define NV1BA0_PIO_SET_VOICE_TAR_PITCH                   0x0000037C
 #   define NV1BA0_PIO_SET_VOICE_TAR_PITCH_STEP              0xFFFF0000
 #define NV1BA0_PIO_SET_VOICE_CFG_BUF_BASE                0x000003A0
@@ -147,7 +150,9 @@ static const struct {
 #   define NV_PAVS_VOICE_PAR_OFFSET_CBO                     0x00FFFFFF
 #define NV_PAVS_VOICE_PAR_NEXT                           0x0000005C
 #   define NV_PAVS_VOICE_PAR_NEXT_EBO                       0x00FFFFFF
-
+#define NV_PAVS_VOICE_TAR_VOLA                           0x00000060
+#define NV_PAVS_VOICE_TAR_VOLB                           0x00000064
+#define NV_PAVS_VOICE_TAR_VOLC                           0x00000068
 #define NV_PAVS_VOICE_TAR_PITCH_LINK                     0x0000007C
 #   define NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE   0x0000FFFF
 #   define NV_PAVS_VOICE_TAR_PITCH_LINK_PITCH               0xFFFF0000
@@ -404,6 +409,24 @@ static void fe_method(MCPXAPUState *d,
                 0xFFFFFFFF,
                 argument);
         break;
+    case NV1BA0_PIO_SET_VOICE_TAR_VOLA:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV],
+                NV_PAVS_VOICE_TAR_VOLA,
+                0xFFFFFFFF,
+                argument);
+        break;
+    case NV1BA0_PIO_SET_VOICE_TAR_VOLB:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV],
+                NV_PAVS_VOICE_TAR_VOLB,
+                0xFFFFFFFF,
+                argument);
+        break;
+    case NV1BA0_PIO_SET_VOICE_TAR_VOLC:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV],
+                NV_PAVS_VOICE_TAR_VOLC,
+                0xFFFFFFFF,
+                argument);
+        break;
     case NV1BA0_PIO_SET_VOICE_TAR_PITCH:
         voice_set_mask(d, d->regs[NV_PAPU_FECV],
                 NV_PAVS_VOICE_TAR_PITCH_LINK,
@@ -522,6 +545,9 @@ static void vp_write(void *opaque, hwaddr addr,
     case NV1BA0_PIO_SET_CURRENT_VOICE:
     case NV1BA0_PIO_SET_VOICE_CFG_VBIN:
     case NV1BA0_PIO_SET_VOICE_CFG_FMT:
+    case NV1BA0_PIO_SET_VOICE_TAR_VOLA:
+    case NV1BA0_PIO_SET_VOICE_TAR_VOLB:
+    case NV1BA0_PIO_SET_VOICE_TAR_VOLC:
     case NV1BA0_PIO_SET_VOICE_TAR_PITCH:
     case NV1BA0_PIO_SET_VOICE_CFG_BUF_BASE:
     case NV1BA0_PIO_SET_VOICE_CFG_BUF_LBO:
