@@ -47,7 +47,7 @@
 #define NODE_CONTROL_DIRECTION (1 << 1)
 
 
-// #define DEBUG
+#define DEBUG
 #ifdef DEBUG
 # define DPRINTF(s, ...) printf(s, ## __VA_ARGS__)
 #else

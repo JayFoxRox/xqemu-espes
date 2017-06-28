@@ -22,6 +22,8 @@
 
 #include "hw/xbox/dsp/dsp.h"
 
+#include "adpcm_block.h"
+
 #include <math.h>
 
 #define NV_PAPU_ISTS                                     0x00001000
@@ -897,6 +899,7 @@ static void se_frame(void *opaque)
 
                 //NV_PAVS_VOICE_PAR_OFFSET_CBO
                 bool stereo = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_STEREO);
+                unsigned int channels = stereo ? 2 : 1;
                 unsigned int sample_size = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE);
 
                 // B8, B16, ADPCM, B32
@@ -941,40 +944,76 @@ static void se_frame(void *opaque)
                     sample_pos += cbo;
                     assert(sample_pos <= ebo);
 
-                    assert(container_size != NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM);
-                    unsigned int block_size = container_sizes[container_size];
-                    block_size *= stereo ? 2 : 1;
+                    if (container_size == NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM) {
+                        //FIXME: Not sure how this behaves otherwise
+                        assert(sample_size == NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S24);
 
-                    uint32_t linear_addr = ba + (sample_pos % (ebo + 1)) * block_size;
-                    hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
-                    //FIXME: Handle reading accross pages?!
+                        unsigned int block_index = sample_pos / 65;
+                        unsigned int block_position = sample_pos % 65;
 
-                    //printf("Sampling from 0x%08X\n", addr);
+                        printf("ADPCM: %d + %d\n", block_index, block_position);
 
-                    // Get samples for this voice
-                    for(unsigned int channel = 0; channel < 2; channel++) {
-                        switch(sample_size) {
-                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_U8:
-                            samples[channel][i] = ldub_phys(addr);
-                            break;
-                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S16:
-                            samples[channel][i] = (int16_t)lduw_le_phys(addr);
-                            break;
-                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S24:
-                            samples[channel][i] = (int32_t)(ldl_le_phys(addr) << 8) >> 8;
-                            break;
-                        case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S32:
-                            samples[channel][i] = (int32_t)ldl_le_phys(addr);
-                            break;
-                        }
+                        //FIXME: Remove this from the loop which collects required samples
+                        //       We can always just grab one or two blocks to get all required samples
                         if (stereo) {
-                            // Advance cursor to second channel
-                            //FIXME!!!
-                            addr += block_size / 2;
+                            // There are 65 samples per 72 byte block
+                            uint32_t block[72/4];
+                            uint32_t linear_addr = ba + block_index * 72;
+                            // FIXME: Only load block data which will be used
+                            for(unsigned int word_index = 0; word_index < 18; word_index++) {
+                                hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
+                                block[word_index] = ldl_le_phys(addr);
+                                linear_addr += 4;
+                            }
+                            //FIXME: Used wrong sample format in my own decoder.. stupid me lol
+                            int16_t tmp[2];
+                            adpcm_decode_stereo_block(&tmp[0], &tmp[1], block, block_position, block_position);
+                            samples[0][i] = tmp[0];
+                            samples[1][i] = tmp[1];
                         } else {
-                            assert(sizeof(samples[0]) == 0x20 * 4);
-                            memcpy(samples[1], samples[0], sizeof(samples[0]));
-                            break;
+                            // There are 65 samples per 36 byte block
+                            uint32_t block[36/4];
+                            uint32_t linear_addr = ba + block_index * 36;
+                            for(unsigned int word_index = 0; word_index < 9; word_index++) {
+                                hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
+                                block[word_index] = ldl_le_phys(addr);
+                                linear_addr += 4;
+                            }
+                            //FIXME: Used wrong sample format in my own decoder.. stupid me lol
+                            int16_t tmp;
+                            adpcm_decode_mono_block(&tmp, block, block_position, block_position);
+                            samples[0][i] = tmp;
+                        }
+
+                    } else {
+                        unsigned int block_size = container_sizes[container_size];
+                        block_size *= channels;
+
+                        uint32_t linear_addr = ba + sample_pos * block_size;
+                        hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
+                        //FIXME: Handle reading accross pages?!
+
+                        //printf("Sampling from 0x%08X\n", addr);
+
+                        // Get samples for this voice
+                        for(unsigned int channel = 0; channel < channels; channel++) {
+                            switch(sample_size) {
+                            case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_U8:
+                                samples[channel][i] = ldub_phys(addr);
+                                break;
+                            case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S16:
+                                samples[channel][i] = (int16_t)lduw_le_phys(addr);
+                                break;
+                            case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S24:
+                                samples[channel][i] = (int32_t)(ldl_le_phys(addr) << 8) >> 8;
+                                break;
+                            case NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S32:
+                                samples[channel][i] = (int32_t)ldl_le_phys(addr);
+                                break;
+                            }
+                         
+                            // Advance cursor to second channel for stereo
+                            addr += block_size / 2;
                         }
                     }
                 }
@@ -1023,7 +1062,7 @@ static void se_frame(void *opaque)
 
                   for(unsigned int i = 0; i < 0x20; i++) {
                     wav_out_write(&buf_wav_out[1], &samples[0][i], 3); // mixbuf for voice
-                    wav_out_write(&buf_wav_out[1], &samples[1][i], 3); // mixbuf for voice
+                    wav_out_write(&buf_wav_out[1], &samples[channels - 1][i], 3); // mixbuf for voice
                   }
                   wav_out_update(&buf_wav_out[1]);
                 }
@@ -1082,7 +1121,7 @@ static void se_frame(void *opaque)
                     for(unsigned int i = 0; i < 0x20; i++) {
                         //FIXME: how is the volume added?
                         //FIXME: What happens to the other channel? Is this behaviour correct?
-                        mixbuf[bin[j]][i] += (0xFFF - vol[j]) * samples[j % 2][i] / 0xFFF;
+                        mixbuf[bin[j]][i] += (0xFFF - vol[j]) * samples[j % channels][i] / 0xFFF;
                     }
                 }
 skipvoice:; // FIXME: Remove.. hack!
@@ -1126,7 +1165,7 @@ skipvoice:; // FIXME: Remove.. hack!
         dsp_start_frame(d->gp.dsp);
 
         // hax
-        dsp_run(d->gp.dsp, 40000);
+        dsp_run(d->gp.dsp, 30000);
     }
 
 #if 1
