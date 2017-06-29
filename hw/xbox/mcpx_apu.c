@@ -155,6 +155,7 @@ static const struct {
 #define NV_PAVS_VOICE_CFG_FMT                            0x00000004
 #   define NV_PAVS_VOICE_CFG_FMT_V6BIN                      (0x1F << 0)
 #   define NV_PAVS_VOICE_CFG_FMT_V7BIN                      (0x1F << 5)
+#   define NV_PAVS_VOICE_CFG_FMT_SAMPLES_PER_BLOCK          (0x1F << 16)
 #   define NV_PAVS_VOICE_CFG_FMT_DATA_TYPE                  (1 << 24)
 #   define NV_PAVS_VOICE_CFG_FMT_LOOP                       (1 << 25)
 #   define NV_PAVS_VOICE_CFG_FMT_STEREO                     (1 << 27)
@@ -904,7 +905,9 @@ static void se_frame(void *opaque)
 
                 // B8, B16, ADPCM, B32
                 unsigned int container_sizes[4] = { 1, 2, 0, 4 };
-                unsigned int container_size = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE);
+                unsigned int container_size_index = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE);
+                //FIXME: Move down, but currently debug code depends on this
+                unsigned int container_size = container_sizes[container_size_index];
 
                 bool stream = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_DATA_TYPE);
                 assert(!stream);
@@ -914,6 +917,7 @@ static void se_frame(void *opaque)
                 uint32_t cbo = voice_get_mask(d, v, NV_PAVS_VOICE_PAR_OFFSET, NV_PAVS_VOICE_PAR_OFFSET_CBO);
                 uint32_t lbo = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_PSH_SAMPLE, NV_PAVS_VOICE_CUR_PSH_SAMPLE_LBO);
                 uint32_t ba = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_PSL_START, NV_PAVS_VOICE_CUR_PSL_START_BA);
+                unsigned int samples_per_block = 1 + voice_get_mask(d, v, NV_PAVS_VOICE_CFG_FMT, NV_PAVS_VOICE_CFG_FMT_SAMPLES_PER_BLOCK);
 
                 // This is probably cleared when the first sample is played
                 //FIXME: How will this behave if CBO > EBO on first play?
@@ -944,7 +948,7 @@ static void se_frame(void *opaque)
                     sample_pos += cbo;
                     assert(sample_pos <= ebo);
 
-                    if (container_size == NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM) {
+                    if (container_size_index == NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM) {
                         //FIXME: Not sure how this behaves otherwise
                         assert(sample_size == NV_PAVS_VOICE_CFG_FMT_SAMPLE_SIZE_S24);
 
@@ -956,6 +960,7 @@ static void se_frame(void *opaque)
                         //FIXME: Remove this from the loop which collects required samples
                         //       We can always just grab one or two blocks to get all required samples
                         if (stereo) {
+                            assert(samples_per_block == 2);
                             // There are 65 samples per 72 byte block
                             uint32_t block[72/4];
                             uint32_t linear_addr = ba + block_index * 72;
@@ -971,6 +976,7 @@ static void se_frame(void *opaque)
                             samples[0][i] = tmp[0];
                             samples[1][i] = tmp[1];
                         } else {
+                            assert(samples_per_block == 1);
                             // There are 65 samples per 36 byte block
                             uint32_t block[36/4];
                             uint32_t linear_addr = ba + block_index * 36;
@@ -986,8 +992,8 @@ static void se_frame(void *opaque)
                         }
 
                     } else {
-                        unsigned int block_size = container_sizes[container_size];
-                        block_size *= channels;
+                        unsigned int block_size = container_size;
+                        block_size *= samples_per_block;
 
                         uint32_t linear_addr = ba + sample_pos * block_size;
                         hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
@@ -1013,7 +1019,7 @@ static void se_frame(void *opaque)
                             }
                          
                             // Advance cursor to second channel for stereo
-                            addr += block_size / 2;
+                            addr += container_size;
                         }
                     }
                 }
@@ -1051,7 +1057,7 @@ static void se_frame(void *opaque)
                     uint32_t sample_pos = cbo + (uint32_t)(i * rate * overdrive);
                     //uint32_t sample_pos = cbo + (uint32_t)(i * rate * overdrive);
                     //FIXME: The mod ebo thing is a hack!
-                    uint32_t linear_addr = ba + (sample_pos % (ebo + 1)) * container_sizes[container_size];
+                    uint32_t linear_addr = ba + (sample_pos % (ebo + 1)) * container_size;
                     hwaddr addr = get_data_ptr(d->regs[NV_PAPU_VPSGEADDR], 0xFFFFFFFF, linear_addr);
                     //printf("Sampling from 0x%08X\n", addr);
                     int16_t sample = (int16_t)lduw_le_phys(addr);
