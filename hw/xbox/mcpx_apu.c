@@ -990,12 +990,14 @@ static void se_frame(void *opaque)
 
     int32_t mixbuf[32][0x20] = {0};
 
+#ifdef APU_DEBUG
     static WAVOutState* buf_wav_out;
     if (buf_wav_out == NULL) {
         buf_wav_out = g_malloc0(sizeof(WAVOutState) * 2);
         wav_out_init(&buf_wav_out[0], "vp-out-buf0.wav", 44100, 16, 1);
         wav_out_init(&buf_wav_out[1], "vp-out-buf1.wav", 48000, 24, 1);
     }
+#endif
 
     for (list=0; list < 3; list++) {
         hwaddr top, current, next;
@@ -1283,7 +1285,7 @@ skipvoice:; // FIXME: Remove.. hack!
         }
     }
 
-#if 1
+#ifdef APU_DEBUG
     // We can not guarantee sync of AC97 and the APU if the emu is not
     // running in realtime. So for development we should have a clean way
     // of looking at the data. This is said method for the VP.
@@ -1312,7 +1314,7 @@ skipvoice:; // FIXME: Remove.. hack!
         dsp_run(d->gp.dsp, 30000);
     }
 
-#if 1
+#ifdef APU_DEBUG
     // Dump the GP output of DirectSound.
     //FIXME: Would need special code to dump out bootsound probably..
     //       The bootsound dumper is probably closer to EP dumper
@@ -1364,6 +1366,7 @@ skipvoice:; // FIXME: Remove.. hack!
         dsp_run(d->ep.dsp, 1000);
     }
 
+#ifdef APU_DEBUG
 #if 0
     // Dump the EP output
     //FIXME: Use the actual FIFO channel addresses and output both, PCM and SPDIF
@@ -1373,7 +1376,7 @@ skipvoice:; // FIXME: Remove.. hack!
     //wav_init("ep-out-spdif.wav");
 
     //NV_PAPU_EPFADDR
-    
+#endif
 #endif
 
     uint64_t ep_done = qemu_clock_get_ns(QEMU_CLOCK_HOST);
