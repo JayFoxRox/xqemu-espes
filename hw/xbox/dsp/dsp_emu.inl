@@ -6808,6 +6808,38 @@ static void emu_illegal(dsp_core_t* dsp)
     }
 }
 
+static void emu_inc(dsp_core_t* dsp)
+{
+    uint32_t destreg, source[3], dest[3];
+
+    destreg = DSP_REG_A + (dsp->cur_inst & 1);
+    if (destreg == DSP_REG_A) {
+        dest[0] = dsp->registers[DSP_REG_A2];
+        dest[1] = dsp->registers[DSP_REG_A1];
+        dest[2] = dsp->registers[DSP_REG_A0];
+    } else {
+        dest[0] = dsp->registers[DSP_REG_B2];
+        dest[1] = dsp->registers[DSP_REG_B1];
+        dest[2] = dsp->registers[DSP_REG_B0];
+    }
+
+    source[2] = 1;
+    source[1] = 0;
+    source[0] = 0;
+
+    dsp_add56(source, dest);
+
+    if (destreg == DSP_REG_A) {
+        dsp->registers[DSP_REG_A2] = dest[0];
+        dsp->registers[DSP_REG_A1] = dest[1];
+        dsp->registers[DSP_REG_A0] = dest[2];
+    } else {
+        dsp->registers[DSP_REG_B2] = dest[0];
+        dsp->registers[DSP_REG_B1] = dest[1];
+        dsp->registers[DSP_REG_B0] = dest[2];
+    }
+}
+
 static void emu_jcc_imm(dsp_core_t* dsp)
 {
     uint32_t cc_code, newpc;
@@ -7291,6 +7323,29 @@ static void emu_jsset_reg(dsp_core_t* dsp)
         return;
     } 
     ++dsp->cur_inst_len;
+}
+
+static void emu_lsl_imm(dsp_core_t* dsp)
+{
+    uint32_t D = dsp->cur_inst & 1;
+    uint32_t ii = (dsp->cur_inst >> 1) & BITMASK(5);
+
+    int dstreg;
+    if (D) {
+        dstreg = DSP_REG_B1;
+    } else {
+        dstreg = DSP_REG_A1;
+    }
+
+    uint32_t newcarry = (dsp->registers[dstreg]>>(24 - ii)) & 1;
+
+    dsp->registers[dstreg] <<= ii;
+    dsp->registers[dstreg] &= BITMASK(24);
+
+    dsp->registers[DSP_REG_SR] &= BITMASK(16)-((1<<DSP_SR_C)|(1<<DSP_SR_N)|(1<<DSP_SR_Z)|(1<<DSP_SR_V));
+    dsp->registers[DSP_REG_SR] |= newcarry;
+    dsp->registers[DSP_REG_SR] |= ((dsp->registers[dstreg]>>23) & 1)<<DSP_SR_N;
+    dsp->registers[DSP_REG_SR] |= (dsp->registers[dstreg]==0)<<DSP_SR_Z;
 }
 
 static void emu_lua(dsp_core_t* dsp)

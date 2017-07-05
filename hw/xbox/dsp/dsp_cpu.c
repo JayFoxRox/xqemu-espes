@@ -249,7 +249,7 @@ static const OpcodeEntry nonparallel_opcodes[] = {
     { "0000110000011010100sSSSD", "extractu S1, S2, D", NULL, NULL },
     { "0000110000011000100s000D", "extractu #CO, S2, D", NULL, NULL },
     { "000000000000000000000101", "ill", NULL, emu_illegal },
-    { "00000000000000000000100d", "inc D", NULL, NULL },
+    { "00000000000000000000100d", "inc D", NULL, emu_inc },
     { "00001100000110110qqqSSSD", "insert S1, S2, D", NULL, NULL },
     { "00001100000110010qqq000D", "insert #CO, S2, D", NULL, NULL },
     { "00001110CCCCaaaaaaaaaaaa", "jcc xxx", dis_jcc_imm, emu_jcc_imm },
@@ -282,7 +282,7 @@ static const OpcodeEntry nonparallel_opcodes[] = {
     { "0000101111DDDDDD001bbbbb", "jsset #n, S, xxxx", dis_jsset_reg, emu_jsset_reg },
     { "0000010011000RRR000ddddd", "lra Rn, D", NULL, NULL },
     { "0000010001000000010ddddd", "lra xxxx, D", NULL, NULL },
-    { "000011000001111010iiiiiD", "lsl #ii, D", NULL, NULL },
+    { "000011000001111010iiiiiD", "lsl #ii, D", NULL, emu_lsl_imm },
     { "00001100000111100001sssD", "lsl S, D", NULL, NULL },
     { "000011000001111011iiiiiD", "lsr #ii, D", NULL, NULL },
     { "00001100000111100011sssD", "lsr S, D", NULL, NULL },
@@ -1249,7 +1249,7 @@ static uint16_t dsp_asl56(uint32_t *dest, int n)
     return (overflow<<DSP_SR_L)|(v<<DSP_SR_V)|(carry<<DSP_SR_C);
 }
 
-static uint16_t dsp_asr56(uint32_t *dest, int n)
+static uint16_t dsp_lsr56(uint32_t *dest, int n)
 {
     /* Shift right dest n bits: D>>=n */
 
@@ -1263,6 +1263,24 @@ static uint16_t dsp_asr56(uint32_t *dest, int n)
     dest[0] = (dest_v >> 48) & BITMASK(8);
 
     return (carry<<DSP_SR_C);
+}
+
+static uint16_t dsp_asr56(uint32_t *dest, int n)
+{
+    /* Shift right dest n bits: D>>=n, fill MSB with previous MSB */
+
+    uint64_t dest_v = dest[2] | ((uint64_t)dest[1] << 24) | ((uint64_t)dest[0] << 48);
+    uint64_t msb_v = ((dest_v >> 55) & 1) ? (BITMASK(n) << (56 - n)) : 0;
+
+    uint16_t carry = (dest_v >> (n-1)) & 1;
+    
+    dest_v >>= n;
+    dest_v |= msb_v;
+    dest[2] = dest_v & BITMASK(24);
+    dest[1] = (dest_v >> 24) & BITMASK(24);
+    dest[0] = (dest_v >> 48) & BITMASK(8);
+
+    return (carry<<DSP_SR_C); 
 }
 
 static uint16_t dsp_add56(uint32_t *source, uint32_t *dest)
