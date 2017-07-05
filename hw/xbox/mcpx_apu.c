@@ -1404,7 +1404,7 @@ skipvoice:; // FIXME: Remove.. hack!
     for(unsigned int i = 0; i < 0x20; i++) {
         for(unsigned int j = 0; j < 32; j++) {
             uint32_t sample = mixbuf[j][i] & 0xFFFFFF;
-            sample *= 0x80;
+            sample *= 0x40;
             wav_out_write(vp_wav_out, &sample, 3); 
         }
     }
