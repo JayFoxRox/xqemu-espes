@@ -169,19 +169,41 @@ static const struct {
 #       define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_B16         1
 #       define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_ADPCM       2
 #       define NV_PAVS_VOICE_CFG_FMT_CONTAINER_SIZE_B32         3
+#define NV_PAVS_VOICE_CFG_ENV0                           0x00000008
+#   define NV_PAVS_VOICE_CFG_ENV0_EA_ATTACKRATE             (0xFFF << 0)
+#   define NV_PAVS_VOICE_CFG_ENV0_EA_DELAYTIME              (0xFFF << 12)
+#   define NV_PAVS_VOICE_CFG_ENV0_EF_PITCHSCALE             (0xFF << 24)
+#define NV_PAVS_VOICE_CFG_ENVA                           0x0000000C
+#   define NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE              (0xFFF << 0)
+#   define NV_PAVS_VOICE_CFG_ENVA_EA_HOLDTIME               (0xFFF << 12)
+#   define NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL           (0xFF << 24)
+#define NV_PAVS_VOICE_CFG_ENV1                           0x00000010
+#   define NV_PAVS_VOICE_CFG_ENV1_EF_FCSCALE                (0xFF << 24)
+#define NV_PAVS_VOICE_CFG_ENVF                           0x00000014
+#define NV_PAVS_VOICE_CFG_MISC                           0x00000018
+#   define NV_PAVS_VOICE_CFG_MISC_EF_RELEASERATE            (0xFFF << 0)
 
 #define NV_PAVS_VOICE_CUR_PSL_START                      0x00000020
 #   define NV_PAVS_VOICE_CUR_PSL_START_BA                   0x00FFFFFF
 #define NV_PAVS_VOICE_CUR_PSH_SAMPLE                     0x00000024
 #   define NV_PAVS_VOICE_CUR_PSH_SAMPLE_LBO                 0x00FFFFFF
+
+#define NV_PAVS_VOICE_CUR_ECNT                           0x00000034
+#   define NV_PAVS_VOICE_CUR_ECNT_EACOUNT                   0x0000FFFF
+#   define NV_PAVS_VOICE_CUR_ECNT_EFCOUNT                   0xFFFF0000
+
 #define NV_PAVS_VOICE_PAR_STATE                          0x00000054
 #   define NV_PAVS_VOICE_PAR_STATE_PAUSED                   (1 << 18)
 #   define NV_PAVS_VOICE_PAR_STATE_NEW_VOICE                (1 << 20)
 #   define NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE             (1 << 21)
+#   define NV_PAVS_VOICE_PAR_STATE_EFCUR                    (0xF << 24)
+#   define NV_PAVS_VOICE_PAR_STATE_EACUR                    (0xF << 28)
 #define NV_PAVS_VOICE_PAR_OFFSET                         0x00000058
 #   define NV_PAVS_VOICE_PAR_OFFSET_CBO                     0x00FFFFFF
+#   define NV_PAVS_VOICE_PAR_OFFSET_EALVL                   0xFF000000
 #define NV_PAVS_VOICE_PAR_NEXT                           0x0000005C
 #   define NV_PAVS_VOICE_PAR_NEXT_EBO                       0x00FFFFFF
+#   define NV_PAVS_VOICE_PAR_NEXT_EFLVL                     0xFF000000
 #define NV_PAVS_VOICE_TAR_VOLA                           0x00000060
 #   define NV_PAVS_VOICE_TAR_VOLA_VOLUME6_B3_0              0x0000000F
 #   define NV_PAVS_VOICE_TAR_VOLA_VOLUME0                   0x0000FFF0
@@ -197,6 +219,8 @@ static const struct {
 #   define NV_PAVS_VOICE_TAR_VOLC_VOLUME4                   0x0000FFF0
 #   define NV_PAVS_VOICE_TAR_VOLC_VOLUME7_B11_8             0x000F0000
 #   define NV_PAVS_VOICE_TAR_VOLC_VOLUME5                   0xFFF00000
+#define NV_PAVS_VOICE_TAR_LFO_ENV                        0x0000006C
+#   define NV_PAVS_VOICE_TAR_LFO_ENV_EA_RELEASERATE         (0xFFF << 0)
 
 #define NV_PAVS_VOICE_TAR_PITCH_LINK                     0x0000007C
 #   define NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE   0x0000FFFF
@@ -851,8 +875,110 @@ static const MemoryRegionOps ep_ops = {
     .write = ep_write,
 };
 
+static float step_envelope(MCPXAPUState *d, unsigned int v, uint32_t reg_0, uint32_t reg_a, uint32_t rr_reg, uint32_t rr_mask, uint32_t lvl_reg, uint32_t lvl_mask, uint32_t count_mask, uint32_t cur_mask) {
+  uint8_t cur = voice_get_mask(d, v, NV_PAVS_VOICE_PAR_STATE, cur_mask);
+  switch(cur) {
+  case 0: // Off
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, 0);
+    voice_set_mask(d, v, lvl_reg, lvl_mask, 0xFF);
+    return 1.0f;
+  case 1: { // Delay
+    uint16_t count = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
+    count--;
+    voice_set_mask(d, v, lvl_reg, lvl_mask, 0x00); // FIXME: Confirm this?
+    if (count == 0) {
+        cur++;
+        voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
+        count = 0;
+    }
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+    break;
+  }
+  case 2: { // Attack
+    uint16_t count = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
+    count++;
+    uint16_t attack_rate = voice_get_mask(d, v, reg_0, NV_PAVS_VOICE_CFG_ENV0_EA_ATTACKRATE);
+    float value;
+    if (count <= attack_rate) {
+        value = (count * 0xFF) / attack_rate;
+    } else {
+        value = 255.0f;
+    }
+    voice_set_mask(d, v, lvl_reg, lvl_mask, value);
+    //FIXME: Comparison could also be the other way around?! Test please.
+    if (count == (attack_rate * 16)) {
+      cur++;
+      voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
+      uint16_t hold_time = voice_get_mask(d, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_HOLDTIME);
+      count = hold_time * 16;
+    }
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+    return value / 255.0f;
+  }
+  case 3: { // Hold
+    uint16_t count = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count--);
+    voice_set_mask(d, v, lvl_reg, lvl_mask, 0xFF);
+    if (count == 0) {
+      cur++;
+      voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
+      uint16_t decay_rate = voice_get_mask(d, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
+      count = decay_rate * 16;
+    }
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+    return 1.0f;
+  }
+  case 4: { // Decay
+    uint16_t count = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
+    count--;
+    uint16_t decay_rate = voice_get_mask(d, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
+    uint8_t sustain_level = voice_get_mask(d, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
+    //FIXME: This formula and threshold is not accurate, but I can't get it any better for now
+    float value = 255.0f * powf(0.99988799f, (decay_rate * 16 - count) * 4096 / decay_rate);
+    if (value <= (sustain_level + 0.2f) || (value > 255.0f)) {
+      //FIXME: Should we still update lvl?
+      cur++;
+      voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
+    }
+    voice_set_mask(d, v, lvl_reg, lvl_mask, value);
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+    return value / 255.0f;
+  }
+  case 5: { // Sustain
+    uint8_t sustain_level = voice_get_mask(d, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, 0x00); // FIXME: is this only set to 0 once or forced to zero?
+    voice_set_mask(d, v, lvl_reg, lvl_mask, sustain_level);
+    return sustain_level / 255.0f;
+  }
+  case 6: { // Release
+    uint16_t release_rate = voice_get_mask(d, v, rr_reg, rr_mask);
+    uint16_t count = voice_get_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
+    count--;
+    voice_set_mask(d, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+    uint8_t lvl = voice_get_mask(d, v, lvl_reg, lvl_mask);
+    float value = count * lvl / (release_rate * 16);
+    if (count == 0) {
+      //FIXME: What to do now?!
+#if 0 // Hack so we don't assert
+      cur++; // FIXME: Does this happen?!
+      voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
+#else
+      voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, 0x0); // Is this correct? FIXME: Turn off voice?
+#endif
+    }
+    return value / 255.0f;
+  }
+  case 7: // Force release
+    assert(false); //FIXME: This mode is not understood yet
+    return 1.0f;
+  default:
+    fprintf(stderr, "Unknown envelope state 0x%x\n", cur);
+    assert(false);
+  }
+}
 
 /* TODO: this should be on a thread so it waits on the voice lock */
+// This runs at 1500 Hz in hardware
 static void se_frame(void *opaque)
 {
     MCPXAPUState *d = opaque;
@@ -892,8 +1018,12 @@ static void se_frame(void *opaque)
                 uint32_t v = d->regs[current];
                 int32_t samples[2][0x20] = {0};
 
+                float ea_value = step_envelope(d, v, NV_PAVS_VOICE_CFG_ENV0, NV_PAVS_VOICE_CFG_ENVA, NV_PAVS_VOICE_TAR_LFO_ENV, NV_PAVS_VOICE_TAR_LFO_ENV_EA_RELEASERATE, NV_PAVS_VOICE_PAR_OFFSET, NV_PAVS_VOICE_PAR_OFFSET_EALVL, NV_PAVS_VOICE_CUR_ECNT_EACOUNT, NV_PAVS_VOICE_PAR_STATE_EACUR);
+                float ef_value = step_envelope(d, v, NV_PAVS_VOICE_CFG_ENV1, NV_PAVS_VOICE_CFG_ENVF, NV_PAVS_VOICE_CFG_MISC, NV_PAVS_VOICE_CFG_MISC_EF_RELEASERATE, NV_PAVS_VOICE_PAR_NEXT, NV_PAVS_VOICE_PAR_NEXT_EFLVL, NV_PAVS_VOICE_CUR_ECNT_EFCOUNT, NV_PAVS_VOICE_PAR_STATE_EFCUR);
+
                 int16_t p = voice_get_mask(d, v, NV_PAVS_VOICE_TAR_PITCH_LINK, NV_PAVS_VOICE_TAR_PITCH_LINK_PITCH);
-                float rate = powf(2.0f, p / 4096.0f);
+                int8_t pm = voice_get_mask(d, v, NV_PAVS_VOICE_CFG_ENV0, NV_PAVS_VOICE_CFG_ENV0_EF_PITCHSCALE);
+                float rate = powf(2.0f, (p + pm * 32 * ef_value) / 4096.0f);
                 //printf("Got %f\n", rate * 48000.0f);
 
                 float overdrive = 1.0f; //FIXME: This is just a hack because our APU runs too rarely
@@ -1117,6 +1247,14 @@ static void se_frame(void *opaque)
                 
 
 #endif
+
+                // Apply the amplitude envelope
+                //FIXME: Figure out when exactly and how exactly this is actually done
+                for(unsigned int j = 0; j < channels; j++) {
+                    for(unsigned int i = 0; i < 0x20; i++) {
+                        samples[j][i] *= ea_value;
+                    }
+                }
 
                 //FIXME: If phase negations means to flip the signal upside down
                 //       we should modify volume of bin6 and bin7 here.
