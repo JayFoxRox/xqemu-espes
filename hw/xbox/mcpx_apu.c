@@ -147,6 +147,11 @@ typedef struct MCPXAPUState {
     /* Voice Processor */
     struct {
         MemoryRegion mmio;
+
+        QemuThread thread;
+        bool frame_busy;
+        QemuMutex frame_lock;
+        QemuCond frame_cond;
     } vp;
 
     /* Global Processor */
@@ -154,6 +159,11 @@ typedef struct MCPXAPUState {
         MemoryRegion mmio;
         DSPState *dsp;
         uint32_t regs[0x10000];
+
+        QemuThread thread;
+        bool frame_busy;
+        QemuMutex frame_lock;
+        QemuCond frame_cond;
     } gp;
 
     /* Encode Processor */
@@ -161,6 +171,11 @@ typedef struct MCPXAPUState {
         MemoryRegion mmio;
         DSPState *dsp;
         uint32_t regs[0x10000];
+
+        QemuThread thread;
+        bool frame_busy;
+        QemuMutex frame_lock;
+        QemuCond frame_cond;
     } ep;
 
     uint32_t regs[0x20000];
@@ -544,50 +559,175 @@ static const MemoryRegionOps ep_ops = {
 };
 
 
+static void* vp_thread(void *arg)
+{
+    MCPXAPUState *d = arg;
+    while(true) {
+        qemu_mutex_lock(&d->vp.frame_lock);
+        while(!d->vp.frame_busy) {
+            qemu_cond_wait(&d->vp.frame_cond, &d->vp.frame_lock);
+        }
+
+        static int id = 0;
+        printf("vp start %d\n", id++);
+        int list;
+        for (list=0; list < 3; list++) {
+            hwaddr top, current, next;
+            top = voice_list_regs[list].top;
+            current = voice_list_regs[list].current;
+            next = voice_list_regs[list].next;
+
+            d->regs[current] = d->regs[top];
+            MCPX_DPRINTF("list %d current voice %d\n", list, d->regs[current]);
+            while (d->regs[current] != 0xFFFF) {
+                d->regs[next] = voice_get_mask(d, d->regs[current],
+                    NV_PAVS_VOICE_TAR_PITCH_LINK,
+                    NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE);
+                if (!voice_get_mask(d, d->regs[current],
+                        NV_PAVS_VOICE_PAR_STATE,
+                        NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE)) {
+                    MCPX_DPRINTF("voice %d not active...!\n", d->regs[current]);
+                    fe_method(d, SE2FE_IDLE_VOICE, d->regs[current]);
+                }
+                MCPX_DPRINTF("next voice %d\n", d->regs[next]);
+                d->regs[current] = d->regs[next];
+            }
+        }
+        printf("vp end, waiting for gp\n");
+
+        // VP can't finish before GP has finished the previous MIXBUF (which
+        // only ever holds one frame)
+        qemu_mutex_lock(&d->gp.frame_lock);
+        while(d->gp.frame_busy) {
+            qemu_cond_wait(&d->gp.frame_cond, &d->gp.frame_lock);
+        }
+        printf("gp idle\n");
+
+        printf("vp starting copy\n");
+
+        //FIXME: Copy new VP data to mixbuf
+
+        printf("vp copy complete\n");
+
+        // Kick off the next GP frame
+        d->gp.frame_busy = true;
+        qemu_cond_signal(&d->gp.frame_cond);
+        qemu_mutex_unlock(&d->gp.frame_lock);
+
+        d->vp.frame_busy = false;
+        qemu_cond_signal(&d->vp.frame_cond);
+        qemu_mutex_unlock(&d->vp.frame_lock);
+    }
+    return NULL;
+}
+
+static void* gp_thread(void *arg)
+{
+    MCPXAPUState *d = arg;
+    while(true) {
+        qemu_mutex_lock(&d->gp.frame_lock);
+        while(!d->gp.frame_busy) {
+            qemu_cond_wait(&d->gp.frame_cond, &d->gp.frame_lock);
+        }
+
+        printf("gp waiting for ep\n");
+
+//#define SYNC_GP_EP
+#ifdef SYNC_GP_EP
+         // GP probably can't start before previous EP has processed scratch mem
+        // (it might be able to as GP and EP seem to share a ringbuffer in scratch)
+        // + GP can't start before last GP frame has finished
+        // + EP can't start before last EP frame has finished
+        // = Wait for previous EP frame, too. Then start a new GP and EP frame
+        qemu_mutex_lock(&d->ep.frame_lock);
+        while(d->ep.frame_busy) {
+            qemu_cond_wait(&d->ep.frame_cond, &d->ep.frame_lock);
+        }
+        printf("ep idle\n");
+#endif
+
+        static int id = 0;
+        printf("gp start %d\n", id++);
+        if ((d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST)
+            && (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
+            dsp_start_frame(d->gp.dsp);
+
+            // hax
+            dsp_run(d->gp.dsp, 1000);
+        }
+        printf("gp end\n");
+
+#ifndef SYNC_GP_EP
+        qemu_mutex_lock(&d->ep.frame_lock);
+        while(d->ep.frame_busy) {
+            qemu_cond_wait(&d->ep.frame_cond, &d->ep.frame_lock);
+        }
+        printf("ep idle\n");
+#endif
+        // Now start the next EP frame
+        d->ep.frame_busy = true;
+        qemu_cond_signal(&d->ep.frame_cond);
+        qemu_mutex_unlock(&d->ep.frame_lock);
+
+        d->gp.frame_busy = false;
+        qemu_cond_signal(&d->gp.frame_cond);
+        qemu_mutex_unlock(&d->gp.frame_lock);
+    }
+    return NULL;
+}
+
+static void* ep_thread(void *arg)
+{
+    MCPXAPUState *d = arg;
+    while(true) {
+        qemu_mutex_lock(&d->ep.frame_lock);
+        while(!d->ep.frame_busy) {
+            qemu_cond_wait(&d->ep.frame_cond, &d->ep.frame_lock);
+        }
+
+        static int id = 0;
+        printf("ep start %d\n", id++);
+        if ((d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPRST)
+            && (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPDSPRST)) {
+            dsp_start_frame(d->ep.dsp);
+
+            // hax
+            // dsp_run(d->ep.dsp, 1000);
+        }
+        printf("ep end\n");
+        d->ep.frame_busy = false;
+        qemu_cond_signal(&d->ep.frame_cond);
+        qemu_mutex_unlock(&d->ep.frame_lock);
+    }
+    return NULL;
+}
+
+
+
 /* TODO: this should be on a thread so it waits on the voice lock */
 static void se_frame(void *opaque)
 {
     MCPXAPUState *d = opaque;
-    timer_mod(d->se.frame_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 10);
+    //FIXME: This should probably run against absolute time or audio hardware
+    //       at exactly 32 / (48000 Hz) = 1500 Hz.
+    //       If this drifts from the audio hardware, we'll get crackling noises
+    //       as the EP will overwrite where AC97 is reading.
+    timer_mod(d->se.frame_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + (int64_t)666666);
     MCPX_DPRINTF("mcpx frame ping\n");
-    int list;
-    for (list=0; list < 3; list++) {
-        hwaddr top, current, next;
-        top = voice_list_regs[list].top;
-        current = voice_list_regs[list].current;
-        next = voice_list_regs[list].next;
 
-        d->regs[current] = d->regs[top];
-        MCPX_DPRINTF("list %d current voice %d\n", list, d->regs[current]);
-        while (d->regs[current] != 0xFFFF) {
-            d->regs[next] = voice_get_mask(d, d->regs[current],
-                NV_PAVS_VOICE_TAR_PITCH_LINK,
-                NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE);
-            if (!voice_get_mask(d, d->regs[current],
-                    NV_PAVS_VOICE_PAR_STATE,
-                    NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE)) {
-                MCPX_DPRINTF("voice %d not active...!\n", d->regs[current]);
-                fe_method(d, SE2FE_IDLE_VOICE, d->regs[current]);
-            }
-            MCPX_DPRINTF("next voice %d\n", d->regs[next]);
-            d->regs[current] = d->regs[next];
-        }
+    static int id = 0;
+    printf("\nframe start %d\n\n", id++);
+
+    // Wait for VP lock so we can start a new frame
+    qemu_mutex_lock(&d->vp.frame_lock);
+    while(d->vp.frame_busy) {
+        qemu_cond_wait(&d->vp.frame_cond, &d->vp.frame_lock);
     }
 
-    if ((d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPRST)
-        && (d->gp.regs[NV_PAPU_GPRST] & NV_PAPU_GPRST_GPDSPRST)) {
-        dsp_start_frame(d->gp.dsp);
-
-        // hax
-        dsp_run(d->gp.dsp, 1000);
-    }
-    if ((d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPRST)
-        && (d->ep.regs[NV_PAPU_EPRST] & NV_PAPU_GPRST_GPDSPRST)) {
-        dsp_start_frame(d->ep.dsp);
-
-        // hax
-        // dsp_run(d->ep.dsp, 1000);
-    }
+    printf("vp idle\n");
+    d->vp.frame_busy = true;
+    qemu_cond_signal(&d->vp.frame_cond);
+    qemu_mutex_unlock(&d->vp.frame_lock);
 }
 
 
@@ -614,11 +754,24 @@ static int mcpx_apu_initfn(PCIDevice *dev)
 
     pci_register_bar(&d->dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->mmio);
 
-
-    d->se.frame_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, se_frame, d);
-
     d->gp.dsp = dsp_init(d, gp_scratch_rw);
     d->ep.dsp = dsp_init(d, ep_scratch_rw);
+
+    //FIXME: Missing cleanup when device is destroyed
+    d->vp.frame_busy = false;
+    qemu_mutex_init(&d->vp.frame_lock);
+    qemu_cond_init(&d->vp.frame_cond);
+    qemu_thread_create(&d->vp.thread, vp_thread, d, QEMU_THREAD_JOINABLE);
+    d->gp.frame_busy = false;
+    qemu_mutex_init(&d->gp.frame_lock);
+    qemu_cond_init(&d->gp.frame_cond);
+    qemu_thread_create(&d->gp.thread, gp_thread, d, QEMU_THREAD_JOINABLE);
+    d->ep.frame_busy = false;
+    qemu_mutex_init(&d->ep.frame_lock);
+    qemu_cond_init(&d->ep.frame_cond);
+    qemu_thread_create(&d->ep.thread, ep_thread, d, QEMU_THREAD_JOINABLE);
+
+    d->se.frame_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, se_frame, d);
 
     return 0;
 }
