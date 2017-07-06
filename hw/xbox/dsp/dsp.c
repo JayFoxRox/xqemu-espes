@@ -149,6 +149,8 @@ void dsp_step(DSPState* dsp)
     dsp56k_execute_instruction(&dsp->core);
 }
 
+int foodebug = 0;
+
 void dsp_run(DSPState* dsp, int cycles)
 {
     dsp->save_cycles += cycles;
@@ -166,6 +168,9 @@ void dsp_run(DSPState* dsp, int cycles)
     //  printf("--> %d\n", dsp->core.save_cycles);
     while (dsp->save_cycles > 0)
     {
+if (foodebug) {
+        printf("%d cycles remaining\n", dsp->save_cycles);
+}
         dsp56k_execute_instruction(&dsp->core);
         dsp->save_cycles -= dsp->core.instr_cycle;
     }
